@@ -18,6 +18,7 @@ import type {
   EnrollStudentInput,
   GradeEssayInput,
   GradebookQueryInput,
+  ListAssignmentsInput,
   OfflineEventInput,
   PlatformRepository,
   PublishAssignmentInput,
@@ -537,6 +538,57 @@ export class PostgresPlatformRepository implements PlatformRepository {
       `, params);
       return result.rows.map((row) => ({
         id: row.id, studentId: row.student_id, subjectId: row.subject_id, assignmentId: row.assignment_id,
+        score: numeric(row.score), maxScore: numeric(row.max_score), source: row.source, recordedAt: row.recorded_at.toISOString(),
+      }));
+    });
+  }
+
+  async listAssignments(actor: AuthContext, input: ListAssignmentsInput): Promise<unknown> {
+    const schoolId = assertSchoolActor(actor);
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => {
+      if (actor.role === 'TEACHER') {
+        const permitted = await client.query<{ allowed: boolean }>(`
+          SELECT EXISTS (SELECT 1 FROM class_teacher_assignments WHERE class_id = $1 AND teacher_id = $2) AS allowed
+        `, [input.classId, actor.userId]);
+        if (!permitted.rows[0]?.allowed) throw forbidden('Bạn không được phân công quản lý lớp này.');
+      }
+      if (actor.role === 'STUDENT') {
+        const enrolled = await client.query<{ allowed: boolean }>(`
+          SELECT EXISTS (SELECT 1 FROM class_enrollments WHERE class_id = $1 AND student_id = $2 AND status = 'ACTIVE') AS allowed
+        `, [input.classId, actor.userId]);
+        if (!enrolled.rows[0]?.allowed) throw forbidden('Bạn không thuộc lớp học này.');
+      }
+      const conditions = ['a.class_id = $1'];
+      const params: unknown[] = [input.classId];
+      if (input.subjectId) { params.push(input.subjectId); conditions.push(`a.subject_id = $${params.length}`); }
+      if (actor.role === 'STUDENT') conditions.push(`a.status = 'PUBLISHED'`);
+      const result = await client.query<{ id: string; subject_id: string; title: string; status: string; due_at: Date | null; published_at: Date | null }>(`
+        SELECT a.id, a.subject_id, a.title, a.status, a.due_at, a.published_at
+        FROM assignments a
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY a.created_at DESC
+        LIMIT 200
+      `, params);
+      return result.rows.map((row) => ({
+        id: row.id, subjectId: row.subject_id, title: row.title, status: row.status,
+        dueAt: row.due_at?.toISOString() ?? null, publishedAt: row.published_at?.toISOString() ?? null,
+      }));
+    });
+  }
+
+  async getMyGrades(actor: AuthContext): Promise<unknown> {
+    const schoolId = assertSchoolActor(actor);
+    if (actor.role !== 'STUDENT') throw forbidden('Chỉ học sinh có thể xem điểm cá nhân qua route này.');
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => {
+      const result = await client.query<{ id: string; subject_id: string; assignment_id: string | null; score: string; max_score: string; source: string; recorded_at: Date }>(`
+        SELECT id, subject_id, assignment_id, score, max_score, source, recorded_at
+        FROM gradebook_entries
+        WHERE student_id = $1
+        ORDER BY recorded_at DESC
+        LIMIT 500
+      `, [actor.userId]);
+      return result.rows.map((row) => ({
+        id: row.id, subjectId: row.subject_id, assignmentId: row.assignment_id,
         score: numeric(row.score), maxScore: numeric(row.max_score), source: row.source, recordedAt: row.recorded_at.toISOString(),
       }));
     });

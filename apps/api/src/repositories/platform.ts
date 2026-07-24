@@ -78,6 +78,11 @@ export interface GradebookQueryInput {
   studentId?: string;
 }
 
+export interface ListAssignmentsInput {
+  classId: string;
+  subjectId?: string;
+}
+
 /** Stable application boundary: the HTTP layer never issues SQL directly. */
 export interface PlatformRepository {
   getDashboard(actor: AuthContext): Promise<unknown>;
@@ -97,5 +102,7 @@ export interface PlatformRepository {
   publishAssignment(actor: AuthContext, input: PublishAssignmentInput, idempotencyKey: string): Promise<unknown>;
   gradeEssay(actor: AuthContext, input: GradeEssayInput, idempotencyKey: string): Promise<unknown>;
   getGradebook(actor: AuthContext, input: GradebookQueryInput): Promise<unknown>;
+  listAssignments(actor: AuthContext, input: ListAssignmentsInput): Promise<unknown>;
+  getMyGrades(actor: AuthContext): Promise<unknown>;
   close?(): Promise<void>;
 }

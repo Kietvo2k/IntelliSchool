@@ -32,6 +32,7 @@ const createQuestionSchema = z.object({ bankId: z.string().uuid(), type: z.enum(
 const createAssignmentSchema = z.object({ classId: z.string().uuid(), subjectId: z.string().uuid(), title: z.string().trim().min(3).max(200), instructions: z.string().trim().max(10000).default(''), dueAt: z.string().datetime().nullable().default(null), items: z.array(z.object({ questionVersionId: z.string().uuid(), position: z.number().int().positive(), points: z.number().positive().max(1000) })).min(1).max(100) });
 const gradeEssaySchema = z.object({ score: z.number().min(0).max(1000), feedback: z.string().trim().max(10000).default('') });
 const gradebookQuerySchema = z.object({ classId: z.string().uuid(), subjectId: z.string().uuid().optional(), studentId: z.string().uuid().optional() });
+const listAssignmentsQuerySchema = z.object({ classId: z.string().uuid(), subjectId: z.string().uuid().optional() });
 const idempotencyKeySchema = z.string().trim().min(8).max(200);
 
 export interface BuildAppOptions { authRepository?: PostgresAuthRepository; schoolAdministrationRepository?: SchoolAdministrationRepository; platformRepository?: PlatformRepository; }
@@ -408,6 +409,24 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     const repository = requirePlatformRepository(request, reply);
     if (!repository) return;
     return reply.send({ data: await repository.getGradebook(auth, parsed.data) });
+  });
+
+  app.get('/api/v1/assignments', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER', 'TEACHER', 'STUDENT']);
+    if (!auth) return;
+    const parsed = listAssignmentsQuerySchema.safeParse(request.query);
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Tham số truy vấn bài tập không hợp lệ.'));
+    const repository = requirePlatformRepository(request, reply);
+    if (!repository) return;
+    return reply.send({ data: await repository.listAssignments(auth, parsed.data) });
+  });
+
+  app.get('/api/v1/me/grades', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['STUDENT']);
+    if (!auth) return;
+    const repository = requirePlatformRepository(request, reply);
+    if (!repository) return;
+    return reply.send({ data: await repository.getMyGrades(auth) });
   });
 
   app.post('/api/v1/admin/crawl-jobs', async (request, reply) => {
