@@ -45,10 +45,16 @@ Còn thiếu tiếp theo:
 - `GET /api/v1/assignments?classId=&subjectId=` — liệt kê bài tập theo lớp/môn; học sinh chỉ thấy bài `PUBLISHED` và chỉ khi đã ghi danh lớp đó, giáo viên chỉ xem lớp được phân công (`listAssignments`).
 - `GET /api/v1/me/grades` — học sinh xem điểm cá nhân của chính mình, không cần truyền classId/studentId (`getMyGrades`, chỉ role STUDENT).
 
+Đã bổ sung thêm (commit `4570f42`):
+- `GET /api/v1/question-banks?subjectId=` — liệt kê ngân hàng câu hỏi theo môn (`listQuestionBanks`).
+- `GET /api/v1/questions?bankId=` — liệt kê câu hỏi trong một ngân hàng, trả về version hiện tại (`current_version`) kèm trạng thái duyệt (`listQuestions`).
+
+Phase 3 API coverage hiện đủ vertical slice: question bank → question → assignment (create/publish/list) → submission (auto-grade) → essay grading → gradebook (class query + student self-view). Toàn bộ có test, đều PASS bằng test double.
+
 Còn thiếu tiếp theo (Phase 3):
-- Route GET để list question banks/questions theo môn (hiện chỉ có route tạo, chưa có route liệt kê cho UI ngân hàng câu hỏi).
-- Web: vẫn chỉ có 1 `RoleWorkspace` chung cho 4 role, CHƯA có màn hình con riêng (không có trang lớp học, ngân hàng câu hỏi, bài tập, chấm bài...). Đây là phần việc UI lớn nhất còn lại của Phase 3.
+- Web: vẫn chỉ có 1 `RoleWorkspace` chung cho 4 role, CHƯA có màn hình con riêng (không có trang lớp học, ngân hàng câu hỏi, bài tập, chấm bài...). Đây là phần việc UI lớn nhất còn lại của Phase 3 — nên làm tiếp theo.
 - Chưa có báo cáo tiến độ tổng hợp theo lớp/học sinh (khác gradebook thô — cần tính trung bình, xu hướng theo thời gian).
+- Chưa test tích hợp PostgreSQL thật cho các route LMS mới (chỉ có test double) — cần bổ sung khi Docker Desktop hoạt động trở lại trên máy dev.
 
 ### Phase 4 — NekoPath adaptive learning: MỚI BẮT ĐẦU
 - Domain thuần `domain/learning/adaptive.ts` (63 dòng) + schema đủ (skill_graphs, skill_item_mappings, learning_events, adaptive_diagnoses, teacher_overrides, offline_outbox).
