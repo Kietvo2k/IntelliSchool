@@ -33,6 +33,8 @@ const createAssignmentSchema = z.object({ classId: z.string().uuid(), subjectId:
 const gradeEssaySchema = z.object({ score: z.number().min(0).max(1000), feedback: z.string().trim().max(10000).default('') });
 const gradebookQuerySchema = z.object({ classId: z.string().uuid(), subjectId: z.string().uuid().optional(), studentId: z.string().uuid().optional() });
 const listAssignmentsQuerySchema = z.object({ classId: z.string().uuid(), subjectId: z.string().uuid().optional() });
+const listQuestionBanksQuerySchema = z.object({ subjectId: z.string().uuid() });
+const listQuestionsQuerySchema = z.object({ bankId: z.string().uuid() });
 const idempotencyKeySchema = z.string().trim().min(8).max(200);
 
 export interface BuildAppOptions { authRepository?: PostgresAuthRepository; schoolAdministrationRepository?: SchoolAdministrationRepository; platformRepository?: PlatformRepository; }
@@ -419,6 +421,26 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     const repository = requirePlatformRepository(request, reply);
     if (!repository) return;
     return reply.send({ data: await repository.listAssignments(auth, parsed.data) });
+  });
+
+  app.get('/api/v1/question-banks', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER', 'TEACHER']);
+    if (!auth) return;
+    const parsed = listQuestionBanksQuerySchema.safeParse(request.query);
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Tham số truy vấn ngân hàng câu hỏi không hợp lệ.'));
+    const repository = requirePlatformRepository(request, reply);
+    if (!repository) return;
+    return reply.send({ data: await repository.listQuestionBanks(auth, parsed.data) });
+  });
+
+  app.get('/api/v1/questions', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER', 'TEACHER']);
+    if (!auth) return;
+    const parsed = listQuestionsQuerySchema.safeParse(request.query);
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Tham số truy vấn câu hỏi không hợp lệ.'));
+    const repository = requirePlatformRepository(request, reply);
+    if (!repository) return;
+    return reply.send({ data: await repository.listQuestions(auth, parsed.data) });
   });
 
   app.get('/api/v1/me/grades', async (request, reply) => {

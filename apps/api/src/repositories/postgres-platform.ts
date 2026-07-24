@@ -19,6 +19,8 @@ import type {
   GradeEssayInput,
   GradebookQueryInput,
   ListAssignmentsInput,
+  ListQuestionBanksInput,
+  ListQuestionsInput,
   OfflineEventInput,
   PlatformRepository,
   PublishAssignmentInput,
@@ -591,6 +593,32 @@ export class PostgresPlatformRepository implements PlatformRepository {
         id: row.id, subjectId: row.subject_id, assignmentId: row.assignment_id,
         score: numeric(row.score), maxScore: numeric(row.max_score), source: row.source, recordedAt: row.recorded_at.toISOString(),
       }));
+    });
+  }
+
+  async listQuestionBanks(actor: AuthContext, input: ListQuestionBanksInput): Promise<unknown> {
+    const schoolId = assertSchoolActor(actor);
+    if (actor.role !== 'SCHOOL_OWNER' && actor.role !== 'TEACHER') throw forbidden('Bạn không có quyền xem ngân hàng câu hỏi.');
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => {
+      const result = await client.query<{ id: string; subject_id: string; name: string }>(`
+        SELECT id, subject_id, name FROM question_banks WHERE subject_id = $1 ORDER BY name
+      `, [input.subjectId]);
+      return result.rows.map((row) => ({ id: row.id, subjectId: row.subject_id, name: row.name }));
+    });
+  }
+
+  async listQuestions(actor: AuthContext, input: ListQuestionsInput): Promise<unknown> {
+    const schoolId = assertSchoolActor(actor);
+    if (actor.role !== 'SCHOOL_OWNER' && actor.role !== 'TEACHER') throw forbidden('Bạn không có quyền xem câu hỏi.');
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => {
+      const result = await client.query<{ id: string; version_id: string; type: QuestionType; max_score: string; is_approved: boolean }>(`
+        SELECT q.id, qv.id AS version_id, qv.type, qv.max_score, qv.is_approved
+        FROM questions q
+        JOIN question_versions qv ON qv.question_id = q.id AND qv.version = q.current_version
+        WHERE q.bank_id = $1
+        ORDER BY q.created_at DESC
+      `, [input.bankId]);
+      return result.rows.map((row) => ({ id: row.id, versionId: row.version_id, type: row.type, maxScore: numeric(row.max_score), isApproved: row.is_approved }));
     });
   }
 
