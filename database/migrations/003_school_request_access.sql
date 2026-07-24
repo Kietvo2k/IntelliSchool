@@ -1,0 +1,2 @@
+﻿-- Smart Path Platform does not seed data in schema migrations.
+-- Run the explicit, development-only `npm run db:seed` command after PostgreSQL starts.

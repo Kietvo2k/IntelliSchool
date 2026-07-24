@@ -1,0 +1,23 @@
+{
+    "name":  "smart-path-platform",
+    "version":  "0.1.0",
+    "private":  true,
+    "packageManager":  "npm@10.9.4",
+    "workspaces":  [
+                       "apps/*",
+                       "packages/*"
+                   ],
+    "scripts":  {
+                    "dev":  "concurrently -n api,web -c cyan,magenta \"npm run dev -w @smart-path/api\" \"npm run dev -w @smart-path/web\"",
+                    "test":  "npm run test -w @smart-path/api",
+                    "build":  "npm run build -w @smart-path/contracts \u0026\u0026 npm run build -w @smart-path/api \u0026\u0026 npm run build -w @smart-path/web",
+                    "typecheck":  "npm run typecheck -w @smart-path/contracts \u0026\u0026 npm run typecheck -w @smart-path/api \u0026\u0026 npm run typecheck -w @smart-path/web",
+                    "db:seed":  "npm run db:seed -w @smart-path/api"
+                },
+    "devDependencies":  {
+                            "concurrently":  "^9.2.1"
+                        },
+    "engines":  {
+                    "node":  "\u003e=22.0.0"
+                }
+}
