@@ -7,7 +7,15 @@ import { assertCrawlUrlIsSafe } from '../domain/admin/crawler-safety.js';
 import { rankCareerMatches, scoreRiasecAnswers, type RiasecResult } from '../domain/career/scoring.js';
 import { gradeAnswer, type QuestionType } from '../domain/classroom/grading.js';
 import type { AuthContext } from '../types.js';
-import type { AssignmentSubmissionInput, CreateLessonInput, OfflineEventInput, PlatformRepository } from './platform.js';
+import type {
+  AssignClassTeacherInput,
+  AssignmentSubmissionInput,
+  CreateClassInput,
+  CreateLessonInput,
+  EnrollStudentInput,
+  OfflineEventInput,
+  PlatformRepository,
+} from './platform.js';
 
 interface RepositoryOptions {
   apiPool: pg.Pool;
@@ -309,6 +317,69 @@ export class PostgresPlatformRepository implements PlatformRepository {
     } finally {
       client.release();
     }
+  }
+
+  async createClass(actor: AuthContext, input: CreateClassInput, idempotencyKey: string): Promise<unknown> {
+    const schoolId = assertSchoolActor(actor);
+    if (actor.role !== 'SCHOOL_OWNER') throw forbidden('Chỉ hiệu trưởng được tạo lớp học mới.');
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, 'CLASS_CREATE', idempotencyKey, input, async () => {
+      const result = await client.query<{ id: string; code: string; name: string; grade_level: number | null; school_year: string }>(`
+        INSERT INTO classes (school_id, code, name, grade_level, school_year)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, code, name, grade_level, school_year
+      `, [schoolId, input.code, input.name, input.gradeLevel, input.schoolYear]);
+      const created = result.rows[0]!;
+      await this.audit(client, schoolId, actor.userId, 'CLASS_CREATED', 'class', created.id, { code: created.code });
+      return { id: created.id, code: created.code, name: created.name, gradeLevel: created.grade_level, schoolYear: created.school_year };
+    }));
+  }
+
+  async assignClassTeacher(actor: AuthContext, input: AssignClassTeacherInput, idempotencyKey: string): Promise<unknown> {
+    const schoolId = assertSchoolActor(actor);
+    if (actor.role !== 'SCHOOL_OWNER') throw forbidden('Chỉ hiệu trưởng được phân công giáo viên.');
+    if (input.role === 'SUBJECT_TEACHER' && !input.subjectId) throw new AppError(422, 'VALIDATION_ERROR', 'Phân công giáo viên bộ môn cần chọn môn học.');
+    if (input.role === 'HOMEROOM_TEACHER' && input.subjectId) throw new AppError(422, 'VALIDATION_ERROR', 'Phân công giáo viên chủ nhiệm không được chọn môn học.');
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, 'CLASS_TEACHER_ASSIGN', idempotencyKey, input, async () => {
+      const teacherCheck = await client.query<{ exists: boolean }>(`
+        SELECT EXISTS (SELECT 1 FROM school_memberships WHERE school_id = $1 AND user_id = $2 AND role = 'TEACHER') AS exists
+      `, [schoolId, input.teacherId]);
+      if (!teacherCheck.rows[0]?.exists) throw notFound('Không tìm thấy giáo viên thuộc trường này.');
+      const result = await client.query<{ id: string }>(`
+        INSERT INTO class_teacher_assignments (school_id, class_id, teacher_id, subject_id, role)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (class_id, teacher_id, subject_id, role) DO NOTHING
+        RETURNING id
+      `, [schoolId, input.classId, input.teacherId, input.subjectId, input.role]);
+      if (!result.rows[0]) throw conflict('ASSIGNMENT_ALREADY_EXISTS', 'Phân công này đã tồn tại.');
+      await this.audit(client, schoolId, actor.userId, 'CLASS_TEACHER_ASSIGNED', 'class_teacher_assignment', result.rows[0].id, { classId: input.classId, teacherId: input.teacherId, role: input.role });
+      return { id: result.rows[0].id, classId: input.classId, teacherId: input.teacherId, subjectId: input.subjectId, role: input.role };
+    }));
+  }
+
+  async enrollStudent(actor: AuthContext, input: EnrollStudentInput, idempotencyKey: string): Promise<unknown> {
+    const schoolId = assertSchoolActor(actor);
+    if (actor.role !== 'SCHOOL_OWNER' && actor.role !== 'TEACHER') throw forbidden('Bạn không có quyền thêm học sinh vào lớp.');
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, 'CLASS_ENROLL_STUDENT', idempotencyKey, input, async () => {
+      if (actor.role === 'TEACHER') {
+        const permitted = await client.query<{ allowed: boolean }>(`
+          SELECT EXISTS (SELECT 1 FROM class_teacher_assignments WHERE class_id = $1 AND teacher_id = $2) AS allowed
+        `, [input.classId, actor.userId]);
+        if (!permitted.rows[0]?.allowed) throw forbidden('Bạn không được phân công quản lý lớp này.');
+      }
+      const studentCheck = await client.query<{ exists: boolean }>(`
+        SELECT EXISTS (SELECT 1 FROM school_memberships WHERE school_id = $1 AND user_id = $2 AND role = 'STUDENT') AS exists
+      `, [schoolId, input.studentId]);
+      if (!studentCheck.rows[0]?.exists) throw notFound('Không tìm thấy học sinh thuộc trường này.');
+      const result = await client.query<{ class_id: string; student_id: string; status: string }>(`
+        INSERT INTO class_enrollments (school_id, class_id, student_id)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (class_id, student_id) DO UPDATE SET status = 'ACTIVE'
+        RETURNING class_id, student_id, status
+      `, [schoolId, input.classId, input.studentId]);
+      const enrollment = result.rows[0]!;
+      await this.audit(client, schoolId, actor.userId, 'CLASS_STUDENT_ENROLLED', 'class_enrollment', enrollment.student_id, { classId: enrollment.class_id });
+      return { classId: enrollment.class_id, studentId: enrollment.student_id, status: enrollment.status };
+    }));
   }
 
   private async assertTeacherCanManage(client: pg.PoolClient, actor: AuthContext, classId: string, subjectId: string): Promise<void> {

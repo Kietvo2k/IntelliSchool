@@ -19,6 +19,25 @@ export interface OfflineEventInput {
   payload: Record<string, unknown>;
 }
 
+export interface CreateClassInput {
+  code: string;
+  name: string;
+  gradeLevel: number;
+  schoolYear: string;
+}
+
+export interface AssignClassTeacherInput {
+  classId: string;
+  teacherId: string;
+  subjectId: string | null;
+  role: 'SUBJECT_TEACHER' | 'HOMEROOM_TEACHER';
+}
+
+export interface EnrollStudentInput {
+  classId: string;
+  studentId: string;
+}
+
 /** Stable application boundary: the HTTP layer never issues SQL directly. */
 export interface PlatformRepository {
   getDashboard(actor: AuthContext): Promise<unknown>;
@@ -29,5 +48,8 @@ export interface PlatformRepository {
   syncOfflineEvents(actor: AuthContext, events: OfflineEventInput[], idempotencyKey: string): Promise<unknown>;
   getBillingQuote(schoolId: string): Promise<unknown>;
   queueCrawlJob(actor: AuthContext, url: string, idempotencyKey: string): Promise<unknown>;
+  createClass(actor: AuthContext, input: CreateClassInput, idempotencyKey: string): Promise<unknown>;
+  assignClassTeacher(actor: AuthContext, input: AssignClassTeacherInput, idempotencyKey: string): Promise<unknown>;
+  enrollStudent(actor: AuthContext, input: EnrollStudentInput, idempotencyKey: string): Promise<unknown>;
   close?(): Promise<void>;
 }

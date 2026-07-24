@@ -20,6 +20,13 @@ const submissionSchema = z.object({ answers: z.array(z.object({ assignmentItemId
 const riasecSchema = z.object({ answers: z.record(z.number().int().min(1).max(5)).refine((answers) => Object.keys(answers).length > 0, 'At least one answer is required') });
 const offlineEventsSchema = z.object({ events: z.array(z.object({ clientEventId: z.string().trim().min(8).max(200), kind: z.string().trim().min(1).max(100), occurredAt: z.string().datetime(), payload: z.record(z.unknown()) })).min(1).max(100) });
 const crawlJobSchema = z.object({ url: z.string().url().max(2048) });
+const createClassSchema = z.object({ code: z.string().trim().min(2).max(64), name: z.string().trim().min(2).max(120), gradeLevel: z.number().int().min(10).max(12), schoolYear: z.string().trim().min(4).max(24) });
+const assignClassTeacherSchema = z.object({ classId: z.string().uuid(), teacherId: z.string().uuid(), subjectId: z.string().uuid().nullable(), role: z.enum(['SUBJECT_TEACHER', 'HOMEROOM_TEACHER']) }).refine((value) => (value.role === 'SUBJECT_TEACHER' ? value.subjectId !== null : value.subjectId === null), 'Giáo viên bộ môn cần chọn môn học; giáo viên chủ nhiệm không chọn môn học.');
+const enrollStudentSchema = z.object({ classId: z.string().uuid(), studentId: z.string().uuid() });
+const createStudentSchema = z.object({ displayName: z.string().trim().min(3).max(120), email: z.string().trim().email().max(254) });
+const inviteTeacherSchema = z.object({ displayName: z.string().trim().min(3).max(120), email: z.string().trim().email().max(254) });
+const acceptInvitationSchema = z.object({ token: z.string().trim().min(16).max(400), newPassword: z.string().min(12).max(128) });
+const updateProfileSchema = z.object({ displayName: z.string().trim().min(1).max(120).optional(), avatarObjectKey: z.string().trim().max(500).nullable().optional(), email: z.string().trim().email().max(254).optional() }).refine((value) => Object.keys(value).length > 0, 'Cần ít nhất một trường để cập nhật hồ sơ.');
 const idempotencyKeySchema = z.string().trim().min(8).max(200);
 
 export interface BuildAppOptions { authRepository?: PostgresAuthRepository; schoolAdministrationRepository?: SchoolAdministrationRepository; platformRepository?: PlatformRepository; }
@@ -86,6 +93,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   function requirePlatformRepository(request: FastifyRequest, reply: FastifyReply): PlatformRepository | null {
     if (options.platformRepository) return options.platformRepository;
     reply.code(503).send(errorBody(request, 'PLATFORM_UNAVAILABLE', 'Dịch vụ nền tảng chưa sẵn sàng.'));
+    return null;
+  }
+  function requireSchoolAdministrationRepository(request: FastifyRequest, reply: FastifyReply): SchoolAdministrationRepository | null {
+    if (options.schoolAdministrationRepository) return options.schoolAdministrationRepository;
+    reply.code(503).send(errorBody(request, 'SCHOOL_REQUESTS_UNAVAILABLE', 'Dịch vụ mở trường chưa sẵn sàng.'));
     return null;
   }
   function clearSession(reply: FastifyReply): void {
@@ -222,6 +234,96 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     const repository = requirePlatformRepository(request, reply);
     if (!repository) return;
     return reply.send({ data: await repository.getBillingQuote(schoolId) });
+  });
+
+  app.post('/api/v1/classes', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER']);
+    if (!auth) return;
+    if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
+    const parsed = createClassSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Thông tin lớp học không hợp lệ.'));
+    const repository = requirePlatformRepository(request, reply);
+    if (!repository) return;
+    return reply.code(201).send({ data: await repository.createClass(auth, parsed.data, idempotencyKey) });
+  });
+
+  app.post('/api/v1/classes/:classId/teachers', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER']);
+    if (!auth) return;
+    if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
+    const classId = (request.params as { classId: string }).classId;
+    const parsed = assignClassTeacherSchema.safeParse({ ...(request.body as object), classId });
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Thông tin phân công giáo viên không hợp lệ.'));
+    const repository = requirePlatformRepository(request, reply);
+    if (!repository) return;
+    return reply.code(201).send({ data: await repository.assignClassTeacher(auth, parsed.data, idempotencyKey) });
+  });
+
+  app.post('/api/v1/classes/:classId/students', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER', 'TEACHER']);
+    if (!auth) return;
+    if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
+    const classId = (request.params as { classId: string }).classId;
+    const parsed = enrollStudentSchema.safeParse({ ...(request.body as object), classId });
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Thông tin ghi danh học sinh không hợp lệ.'));
+    const repository = requirePlatformRepository(request, reply);
+    if (!repository) return;
+    return reply.code(201).send({ data: await repository.enrollStudent(auth, parsed.data, idempotencyKey) });
+  });
+
+  app.post('/api/v1/admin/students', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER', 'TEACHER']);
+    if (!auth) return;
+    if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
+    const parsed = createStudentSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Thông tin học sinh không hợp lệ.'));
+    const repository = requireSchoolAdministrationRepository(request, reply);
+    if (!repository) return;
+    return reply.code(201).send({ data: await repository.createStudent(auth, parsed.data, idempotencyKey) });
+  });
+
+  app.post('/api/v1/admin/teachers/invitations', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER']);
+    if (!auth) return;
+    if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
+    const parsed = inviteTeacherSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Thông tin lời mời không hợp lệ.'));
+    const repository = requireSchoolAdministrationRepository(request, reply);
+    if (!repository) return;
+    return reply.code(201).send({ data: await repository.inviteTeacher(auth, parsed.data, idempotencyKey) });
+  });
+
+  app.post('/api/v1/auth/invitations/accept', { config: { rateLimit: { max: 10, timeWindow: '15 minutes' } } }, async (request, reply) => {
+    if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const parsed = acceptInvitationSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Thông tin lời mời không hợp lệ.'));
+    const repository = requireSchoolAdministrationRepository(request, reply);
+    if (!repository) return;
+    const accepted = await repository.acceptInvitation(parsed.data.token, parsed.data.newPassword);
+    return reply.code(200).send({ data: accepted });
+  });
+
+  app.patch('/api/v1/me/profile', async (request, reply) => {
+    const auth = await requireAuthenticated(request, reply);
+    if (!auth) return;
+    if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
+    const parsed = updateProfileSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Thông tin hồ sơ không hợp lệ.'));
+    const repository = requireSchoolAdministrationRepository(request, reply);
+    if (!repository) return;
+    return reply.send({ data: await repository.updateProfile(auth, parsed.data, idempotencyKey) });
   });
 
   app.post('/api/v1/admin/crawl-jobs', async (request, reply) => {
