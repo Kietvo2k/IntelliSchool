@@ -31,11 +31,21 @@ Còn thiếu tiếp theo:
 - `getDashboard` trong `postgres-platform.ts` chưa trả roster/class list — cần bổ sung khi làm UI riêng từng vai trò (Phase 3).
 - Chưa gửi email lời mời thật qua Mailpit (route trả `invitationToken` trong response JSON để test/dev dùng trực tiếp — cần bổ sung service gửi mail trước khi lên production).
 
-### Phase 3 — LMS đầy đủ: MỚI BẮT ĐẦU
-- Schema đủ (question_banks, question_versions, assignments, assignment_items, assignment_attempts, submission_answers, gradebook_entries).
-- API mới có 2 route thực dùng: `POST /api/v1/lessons`, `POST /api/v1/assignments/:id/submissions` (đủ auto-grading cho MULTIPLE_CHOICE/TRUE_FALSE/SHORT_ANSWER qua `domain/classroom/grading.ts`, ESSAY luôn cần giáo viên chấm).
-- Chưa có: route question bank CRUD, route chấm tự luận (teacher_score/feedback), route gradebook query theo lớp/học sinh/môn, báo cáo tiến độ, publish/unpublish assignment.
-- Web: chỉ có 1 `RoleWorkspace` chung cho 4 role (đổi nav label/copy theo role qua object literal), CHƯA có màn hình con riêng (không có trang lớp học, bài tập, chấm bài...).
+### Phase 3 — LMS đầy đủ: API ĐÃ ĐỦ VERTICAL SLICE, UI CHƯA LÀM
+Đã bổ sung trong phiên 2026-07-24 (sau roster CRUD, commit `3cf5087`):
+- `POST /api/v1/question-banks` — tạo ngân hàng câu hỏi theo môn (`createQuestionBank`).
+- `POST /api/v1/questions` — tạo câu hỏi + version đầu tiên (`is_approved = false` mặc định, đúng yêu cầu plan "giáo viên phải duyệt trước khi publish").
+- `POST /api/v1/assignments` — tạo bài tập ở trạng thái `DRAFT`, chỉ nhận `question_version_id` đã `is_approved = true` (`createAssignment`).
+- `POST /api/v1/assignments/:id/publish` — chuyển `DRAFT` → `PUBLISHED`, chỉ giáo viên được phân công lớp/môn hoặc hiệu trưởng (`publishAssignment`, dùng lại `assertTeacherCanManage`).
+- `POST /api/v1/attempts/:attemptId/answers/:assignmentItemId/grade` — chấm tự luận, tự tính lại tổng điểm và ghi `gradebook_entries` khi tất cả câu đã có điểm (`gradeEssay`).
+- `GET /api/v1/gradebook?classId=&subjectId=&studentId=` — query sổ điểm theo lớp, giáo viên chỉ xem được lớp mình được phân công (`getGradebook`).
+- Test: `apps/api/test/http/platform-routes.test.ts` có thêm 3 test case cho toàn bộ luồng question bank → question → assignment → publish → grade → gradebook. Tổng 24/28 test pass (4 skip do thiếu PostgreSQL, không phải lỗi code).
+
+Còn thiếu tiếp theo:
+- Route GET để list question banks/questions/assignments theo lớp/môn (hiện chỉ có route tạo, chưa có route liệt kê cho UI).
+- Route cho học sinh xem điểm bài tập của mình (hiện `getGradebook` chỉ cho SCHOOL_OWNER/TEACHER, học sinh chưa có route xem điểm cá nhân — cần route riêng vì học sinh chỉ được xem điểm của chính mình).
+- Web: vẫn chỉ có 1 `RoleWorkspace` chung cho 4 role, CHƯA có màn hình con riêng (không có trang lớp học, ngân hàng câu hỏi, bài tập, chấm bài...). Đây là phần việc UI lớn nhất còn lại của Phase 3.
+- Chưa có báo cáo tiến độ tổng hợp theo lớp/học sinh (khác gradebook thô — cần tính trung bình, xu hướng theo thời gian).
 
 ### Phase 4 — NekoPath adaptive learning: MỚI BẮT ĐẦU
 - Domain thuần `domain/learning/adaptive.ts` (63 dòng) + schema đủ (skill_graphs, skill_item_mappings, learning_events, adaptive_diagnoses, teacher_overrides, offline_outbox).
