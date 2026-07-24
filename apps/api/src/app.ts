@@ -27,6 +27,11 @@ const createStudentSchema = z.object({ displayName: z.string().trim().min(3).max
 const inviteTeacherSchema = z.object({ displayName: z.string().trim().min(3).max(120), email: z.string().trim().email().max(254) });
 const acceptInvitationSchema = z.object({ token: z.string().trim().min(16).max(400), newPassword: z.string().min(12).max(128) });
 const updateProfileSchema = z.object({ displayName: z.string().trim().min(1).max(120).optional(), avatarObjectKey: z.string().trim().max(500).nullable().optional(), email: z.string().trim().email().max(254).optional() }).refine((value) => Object.keys(value).length > 0, 'Cần ít nhất một trường để cập nhật hồ sơ.');
+const createQuestionBankSchema = z.object({ subjectId: z.string().uuid(), name: z.string().trim().min(3).max(160) });
+const createQuestionSchema = z.object({ bankId: z.string().uuid(), type: z.enum(['MULTIPLE_CHOICE', 'TRUE_FALSE', 'SHORT_ANSWER', 'ESSAY']), prompt: z.record(z.unknown()), answerKey: z.record(z.unknown()).default({}), rubric: z.record(z.unknown()).default({}), maxScore: z.number().positive().max(1000) });
+const createAssignmentSchema = z.object({ classId: z.string().uuid(), subjectId: z.string().uuid(), title: z.string().trim().min(3).max(200), instructions: z.string().trim().max(10000).default(''), dueAt: z.string().datetime().nullable().default(null), items: z.array(z.object({ questionVersionId: z.string().uuid(), position: z.number().int().positive(), points: z.number().positive().max(1000) })).min(1).max(100) });
+const gradeEssaySchema = z.object({ score: z.number().min(0).max(1000), feedback: z.string().trim().max(10000).default('') });
+const gradebookQuerySchema = z.object({ classId: z.string().uuid(), subjectId: z.string().uuid().optional(), studentId: z.string().uuid().optional() });
 const idempotencyKeySchema = z.string().trim().min(8).max(200);
 
 export interface BuildAppOptions { authRepository?: PostgresAuthRepository; schoolAdministrationRepository?: SchoolAdministrationRepository; platformRepository?: PlatformRepository; }
@@ -324,6 +329,85 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     const repository = requireSchoolAdministrationRepository(request, reply);
     if (!repository) return;
     return reply.send({ data: await repository.updateProfile(auth, parsed.data, idempotencyKey) });
+  });
+
+  app.post('/api/v1/question-banks', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER', 'TEACHER']);
+    if (!auth) return;
+    if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
+    const parsed = createQuestionBankSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Thông tin ngân hàng câu hỏi không hợp lệ.'));
+    const repository = requirePlatformRepository(request, reply);
+    if (!repository) return;
+    return reply.code(201).send({ data: await repository.createQuestionBank(auth, parsed.data, idempotencyKey) });
+  });
+
+  app.post('/api/v1/questions', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER', 'TEACHER']);
+    if (!auth) return;
+    if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
+    const parsed = createQuestionSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Thông tin câu hỏi không hợp lệ.'));
+    const repository = requirePlatformRepository(request, reply);
+    if (!repository) return;
+    return reply.code(201).send({ data: await repository.createQuestion(auth, parsed.data, idempotencyKey) });
+  });
+
+  app.post('/api/v1/assignments', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER', 'TEACHER']);
+    if (!auth) return;
+    if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
+    const parsed = createAssignmentSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Thông tin bài tập không hợp lệ.'));
+    const repository = requirePlatformRepository(request, reply);
+    if (!repository) return;
+    return reply.code(201).send({ data: await repository.createAssignment(auth, parsed.data, idempotencyKey) });
+  });
+
+  app.post('/api/v1/assignments/:id/publish', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER', 'TEACHER']);
+    if (!auth) return;
+    if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
+    const assignmentId = (request.params as { id: string }).id;
+    if (!z.string().uuid().safeParse(assignmentId).success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Mã bài tập không hợp lệ.'));
+    const repository = requirePlatformRepository(request, reply);
+    if (!repository) return;
+    return reply.code(200).send({ data: await repository.publishAssignment(auth, { assignmentId }, idempotencyKey) });
+  });
+
+  app.post('/api/v1/attempts/:attemptId/answers/:assignmentItemId/grade', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER', 'TEACHER']);
+    if (!auth) return;
+    if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
+    const params = request.params as { attemptId: string; assignmentItemId: string };
+    if (!z.string().uuid().safeParse(params.attemptId).success || !z.string().uuid().safeParse(params.assignmentItemId).success) {
+      return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Mã bài nộp hoặc câu hỏi không hợp lệ.'));
+    }
+    const parsed = gradeEssaySchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Thông tin chấm bài không hợp lệ.'));
+    const repository = requirePlatformRepository(request, reply);
+    if (!repository) return;
+    return reply.code(200).send({ data: await repository.gradeEssay(auth, { attemptId: params.attemptId, assignmentItemId: params.assignmentItemId, score: parsed.data.score, feedback: parsed.data.feedback }, idempotencyKey) });
+  });
+
+  app.get('/api/v1/gradebook', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER', 'TEACHER']);
+    if (!auth) return;
+    const parsed = gradebookQuerySchema.safeParse(request.query);
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Tham số truy vấn sổ điểm không hợp lệ.'));
+    const repository = requirePlatformRepository(request, reply);
+    if (!repository) return;
+    return reply.send({ data: await repository.getGradebook(auth, parsed.data) });
   });
 
   app.post('/api/v1/admin/crawl-jobs', async (request, reply) => {

@@ -10,11 +10,17 @@ import type { AuthContext } from '../types.js';
 import type {
   AssignClassTeacherInput,
   AssignmentSubmissionInput,
+  CreateAssignmentInput,
   CreateClassInput,
   CreateLessonInput,
+  CreateQuestionBankInput,
+  CreateQuestionInput,
   EnrollStudentInput,
+  GradeEssayInput,
+  GradebookQueryInput,
   OfflineEventInput,
   PlatformRepository,
+  PublishAssignmentInput,
 } from './platform.js';
 
 interface RepositoryOptions {
@@ -380,6 +386,160 @@ export class PostgresPlatformRepository implements PlatformRepository {
       await this.audit(client, schoolId, actor.userId, 'CLASS_STUDENT_ENROLLED', 'class_enrollment', enrollment.student_id, { classId: enrollment.class_id });
       return { classId: enrollment.class_id, studentId: enrollment.student_id, status: enrollment.status };
     }));
+  }
+
+  async createQuestionBank(actor: AuthContext, input: CreateQuestionBankInput, idempotencyKey: string): Promise<unknown> {
+    const schoolId = assertSchoolActor(actor);
+    if (actor.role !== 'SCHOOL_OWNER' && actor.role !== 'TEACHER') throw forbidden('Bạn không có quyền tạo ngân hàng câu hỏi.');
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, 'QUESTION_BANK_CREATE', idempotencyKey, input, async () => {
+      const result = await client.query<{ id: string; subject_id: string; name: string }>(`
+        INSERT INTO question_banks (school_id, subject_id, name, created_by)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, subject_id, name
+      `, [schoolId, input.subjectId, input.name, actor.userId]);
+      const bank = result.rows[0]!;
+      await this.audit(client, schoolId, actor.userId, 'QUESTION_BANK_CREATED', 'question_bank', bank.id, { subjectId: bank.subject_id });
+      return { id: bank.id, subjectId: bank.subject_id, name: bank.name };
+    }));
+  }
+
+  async createQuestion(actor: AuthContext, input: CreateQuestionInput, idempotencyKey: string): Promise<unknown> {
+    const schoolId = assertSchoolActor(actor);
+    if (actor.role !== 'SCHOOL_OWNER' && actor.role !== 'TEACHER') throw forbidden('Bạn không có quyền tạo câu hỏi.');
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, 'QUESTION_CREATE', idempotencyKey, input, async () => {
+      const bank = await client.query<{ id: string }>('SELECT id FROM question_banks WHERE id = $1', [input.bankId]);
+      if (!bank.rows[0]) throw notFound('Không tìm thấy ngân hàng câu hỏi.');
+      const question = await client.query<{ id: string }>(`
+        INSERT INTO questions (school_id, bank_id, created_by) VALUES ($1, $2, $3) RETURNING id
+      `, [schoolId, input.bankId, actor.userId]);
+      const questionId = question.rows[0]!.id;
+      const version = await client.query<{ id: string; type: QuestionType; max_score: string; is_approved: boolean }>(`
+        INSERT INTO question_versions (school_id, question_id, version, type, prompt, answer_key, rubric, max_score, is_approved, created_by)
+        VALUES ($1, $2, 1, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, false, $8)
+        RETURNING id, type, max_score, is_approved
+      `, [schoolId, questionId, input.type, JSON.stringify(input.prompt), JSON.stringify(input.answerKey), JSON.stringify(input.rubric), input.maxScore, actor.userId]);
+      const created = version.rows[0]!;
+      await this.audit(client, schoolId, actor.userId, 'QUESTION_CREATED', 'question', questionId, { type: created.type, versionId: created.id });
+      return { id: questionId, versionId: created.id, type: created.type, maxScore: numeric(created.max_score), isApproved: created.is_approved };
+    }));
+  }
+
+  async createAssignment(actor: AuthContext, input: CreateAssignmentInput, idempotencyKey: string): Promise<unknown> {
+    const schoolId = assertSchoolActor(actor);
+    if (input.items.length === 0) throw new AppError(422, 'VALIDATION_ERROR', 'Bài tập cần có ít nhất một câu hỏi.');
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, 'ASSIGNMENT_CREATE', idempotencyKey, input, async () => {
+      await this.assertTeacherCanManage(client, actor, input.classId, input.subjectId);
+      const approvedVersions = await client.query<{ id: string }>(`
+        SELECT id FROM question_versions WHERE id = ANY($1::uuid[]) AND is_approved = true
+      `, [input.items.map((item) => item.questionVersionId)]);
+      if (approvedVersions.rows.length !== input.items.length) throw new AppError(422, 'QUESTION_NOT_APPROVED', 'Chỉ có thể dùng câu hỏi đã được duyệt trong bài tập.');
+      const assignment = await client.query<{ id: string; status: string }>(`
+        INSERT INTO assignments (school_id, class_id, subject_id, title, instructions, status, due_at, created_by)
+        VALUES ($1, $2, $3, $4, $5, 'DRAFT', $6, $7)
+        RETURNING id, status
+      `, [schoolId, input.classId, input.subjectId, input.title, input.instructions, input.dueAt, actor.userId]);
+      const assignmentId = assignment.rows[0]!.id;
+      for (const item of input.items) {
+        await client.query(`
+          INSERT INTO assignment_items (school_id, assignment_id, question_version_id, position, points)
+          VALUES ($1, $2, $3, $4, $5)
+        `, [schoolId, assignmentId, item.questionVersionId, item.position, item.points]);
+      }
+      await this.audit(client, schoolId, actor.userId, 'ASSIGNMENT_CREATED', 'assignment', assignmentId, { classId: input.classId, itemCount: input.items.length });
+      return { id: assignmentId, status: assignment.rows[0]!.status, itemCount: input.items.length };
+    }));
+  }
+
+  async publishAssignment(actor: AuthContext, input: PublishAssignmentInput, idempotencyKey: string): Promise<unknown> {
+    const schoolId = assertSchoolActor(actor);
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, 'ASSIGNMENT_PUBLISH', idempotencyKey, input, async () => {
+      const assignmentResult = await client.query<{ class_id: string; subject_id: string; status: string }>(`
+        SELECT class_id, subject_id, status FROM assignments WHERE id = $1
+      `, [input.assignmentId]);
+      const assignment = assignmentResult.rows[0];
+      if (!assignment) throw notFound('Không tìm thấy bài tập.');
+      await this.assertTeacherCanManage(client, actor, assignment.class_id, assignment.subject_id);
+      if (assignment.status !== 'DRAFT') throw conflict('ASSIGNMENT_NOT_DRAFT', 'Chỉ bài tập ở trạng thái nháp mới có thể xuất bản.');
+      await client.query(`UPDATE assignments SET status = 'PUBLISHED', published_at = now() WHERE id = $1`, [input.assignmentId]);
+      await this.audit(client, schoolId, actor.userId, 'ASSIGNMENT_PUBLISHED', 'assignment', input.assignmentId, {});
+      return { id: input.assignmentId, status: 'PUBLISHED' };
+    }));
+  }
+
+  async gradeEssay(actor: AuthContext, input: GradeEssayInput, idempotencyKey: string): Promise<unknown> {
+    const schoolId = assertSchoolActor(actor);
+    if (actor.role !== 'SCHOOL_OWNER' && actor.role !== 'TEACHER') throw forbidden('Bạn không có quyền chấm bài.');
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, 'ESSAY_GRADE', idempotencyKey, input, async () => {
+      const rows = await client.query<{ student_id: string; class_id: string; subject_id: string; assignment_id: string; max_score: string; existing_score: string | null }>(`
+        SELECT aa.student_id, a.class_id, a.subject_id, a.id AS assignment_id, ai.points AS max_score, sa.teacher_score AS existing_score
+        FROM submission_answers sa
+        JOIN assignment_attempts aa ON aa.id = sa.attempt_id
+        JOIN assignments a ON a.id = aa.assignment_id
+        JOIN assignment_items ai ON ai.id = sa.assignment_item_id
+        WHERE sa.attempt_id = $1 AND sa.assignment_item_id = $2
+      `, [input.attemptId, input.assignmentItemId]);
+      const row = rows.rows[0];
+      if (!row) throw notFound('Không tìm thấy bài nộp cần chấm.');
+      await this.assertTeacherCanManage(client, actor, row.class_id, row.subject_id);
+      const maxScore = numeric(row.max_score);
+      if (input.score < 0 || input.score > maxScore) throw new AppError(422, 'VALIDATION_ERROR', `Điểm phải trong khoảng 0 đến ${maxScore}.`);
+
+      await client.query(`
+        UPDATE submission_answers SET teacher_score = $3, feedback = $4, marked_by = $5, marked_at = now()
+        WHERE attempt_id = $1 AND assignment_item_id = $2
+      `, [input.attemptId, input.assignmentItemId, input.score, input.feedback, actor.userId]);
+
+      const remaining = await client.query<{ pending: string }>(`
+        SELECT count(*)::text AS pending FROM submission_answers
+        WHERE attempt_id = $1 AND teacher_score IS NULL AND auto_score IS NULL
+      `, [input.attemptId]);
+      const fullyGraded = numeric(remaining.rows[0]?.pending) === 0;
+      if (fullyGraded) {
+        const totals = await client.query<{ total_score: string; total_max: string }>(`
+          SELECT sum(coalesce(sa.teacher_score, sa.auto_score, 0))::text AS total_score, sum(ai.points)::text AS total_max
+          FROM submission_answers sa
+          JOIN assignment_items ai ON ai.id = sa.assignment_item_id
+          WHERE sa.attempt_id = $1
+        `, [input.attemptId]);
+        const totalScore = numeric(totals.rows[0]?.total_score);
+        const totalMax = numeric(totals.rows[0]?.total_max);
+        await client.query(`UPDATE assignment_attempts SET status = 'GRADED' WHERE id = $1`, [input.attemptId]);
+        await client.query(`
+          INSERT INTO gradebook_entries (school_id, class_id, subject_id, student_id, assignment_id, score, max_score, source, recorded_by)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, 'TEACHER', $8)
+        `, [schoolId, row.class_id, row.subject_id, row.student_id, row.assignment_id, totalScore, totalMax, actor.userId]);
+      }
+      await this.audit(client, schoolId, actor.userId, 'ESSAY_GRADED', 'submission_answer', input.attemptId, { assignmentItemId: input.assignmentItemId, score: input.score, fullyGraded });
+      return { attemptId: input.attemptId, assignmentItemId: input.assignmentItemId, score: input.score, fullyGraded };
+    }));
+  }
+
+  async getGradebook(actor: AuthContext, input: GradebookQueryInput): Promise<unknown> {
+    const schoolId = assertSchoolActor(actor);
+    if (actor.role === 'STUDENT') throw forbidden('Học sinh không có quyền xem sổ điểm lớp.');
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => {
+      if (actor.role === 'TEACHER') {
+        const permitted = await client.query<{ allowed: boolean }>(`
+          SELECT EXISTS (SELECT 1 FROM class_teacher_assignments WHERE class_id = $1 AND teacher_id = $2) AS allowed
+        `, [input.classId, actor.userId]);
+        if (!permitted.rows[0]?.allowed) throw forbidden('Bạn không được phân công quản lý lớp này.');
+      }
+      const conditions = ['ge.class_id = $1'];
+      const params: unknown[] = [input.classId];
+      if (input.subjectId) { params.push(input.subjectId); conditions.push(`ge.subject_id = $${params.length}`); }
+      if (input.studentId) { params.push(input.studentId); conditions.push(`ge.student_id = $${params.length}`); }
+      const result = await client.query<{ id: string; student_id: string; subject_id: string; assignment_id: string | null; score: string; max_score: string; source: string; recorded_at: Date }>(`
+        SELECT ge.id, ge.student_id, ge.subject_id, ge.assignment_id, ge.score, ge.max_score, ge.source, ge.recorded_at
+        FROM gradebook_entries ge
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY ge.recorded_at DESC
+        LIMIT 500
+      `, params);
+      return result.rows.map((row) => ({
+        id: row.id, studentId: row.student_id, subjectId: row.subject_id, assignmentId: row.assignment_id,
+        score: numeric(row.score), maxScore: numeric(row.max_score), source: row.source, recordedAt: row.recorded_at.toISOString(),
+      }));
+    });
   }
 
   private async assertTeacherCanManage(client: pg.PoolClient, actor: AuthContext, classId: string, subjectId: string): Promise<void> {

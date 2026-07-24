@@ -18,6 +18,12 @@ function buildPlatformRepositoryStub(calls: string[]) {
     createClass: async (_actor: unknown, input: { code: string; name: string }, idempotencyKey: string) => { calls.push(`class:${idempotencyKey}`); return { id: 'class-1', ...input }; },
     assignClassTeacher: async (_actor: unknown, input: { classId: string; teacherId: string }, idempotencyKey: string) => { calls.push(`assign:${idempotencyKey}`); return { id: 'assignment-1', ...input }; },
     enrollStudent: async (_actor: unknown, input: { classId: string; studentId: string }, idempotencyKey: string) => { calls.push(`enroll:${idempotencyKey}`); return { ...input, status: 'ACTIVE' }; },
+    createQuestionBank: async (_actor: unknown, input: { subjectId: string; name: string }, idempotencyKey: string) => { calls.push(`bank:${idempotencyKey}`); return { id: 'bank-1', ...input }; },
+    createQuestion: async (_actor: unknown, input: { bankId: string; type: string }, idempotencyKey: string) => { calls.push(`question:${idempotencyKey}`); return { id: 'question-1', versionId: 'version-1', type: input.type, maxScore: 1, isApproved: false }; },
+    createAssignment: async (_actor: unknown, input: { classId: string; items: unknown[] }, idempotencyKey: string) => { calls.push(`assignment:${idempotencyKey}`); return { id: 'assignment-1', status: 'DRAFT', itemCount: input.items.length }; },
+    publishAssignment: async (_actor: unknown, input: { assignmentId: string }, idempotencyKey: string) => { calls.push(`publish:${idempotencyKey}`); return { id: input.assignmentId, status: 'PUBLISHED' }; },
+    gradeEssay: async (_actor: unknown, input: { attemptId: string; assignmentItemId: string; score: number }, idempotencyKey: string) => { calls.push(`grade:${idempotencyKey}`); return { attemptId: input.attemptId, assignmentItemId: input.assignmentItemId, score: input.score, fullyGraded: true }; },
+    getGradebook: async (_actor: unknown, input: { classId: string }) => { calls.push(`gradebook:${input.classId}`); return [{ id: 'entry-1', studentId: 'student-1', subjectId: 'subject-1', assignmentId: null, score: 8.5, maxScore: 10, source: 'TEACHER', recordedAt: new Date(0).toISOString() }]; },
   };
 }
 
@@ -134,6 +140,53 @@ describe('v1 role API surface', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().data.displayName).toBe('Tên mới');
     expect(calls).toEqual(['profile:profile-update-20260724-001']);
+    await app.close();
+  });
+
+  it('lets a teacher build a question bank, question, and draft assignment, then publish it', async () => {
+    const { app, calls } = buildTestApp(teacher);
+    const bank = await app.inject({ method: 'POST', url: '/api/v1/question-banks', headers: { cookie: 'smartpath_session=test', 'x-idempotency-key': 'bank-create-20260724-001' }, payload: { subjectId: '22222222-2222-4222-8222-222222222222', name: 'Ngân hàng Toán 12' } });
+    expect(bank.statusCode).toBe(201);
+
+    const question = await app.inject({ method: 'POST', url: '/api/v1/questions', headers: { cookie: 'smartpath_session=test', 'x-idempotency-key': 'question-create-20260724-001' }, payload: { bankId: '99999999-9999-4999-8999-999999999999', type: 'MULTIPLE_CHOICE', prompt: { text: 'Đạo hàm của x2 là gì?' }, answerKey: { choice: 'A' }, maxScore: 1 } });
+    expect(question.statusCode).toBe(201);
+    expect(question.json().data).toMatchObject({ id: 'question-1', versionId: 'version-1' });
+
+    const assignment = await app.inject({ method: 'POST', url: '/api/v1/assignments', headers: { cookie: 'smartpath_session=test', 'x-idempotency-key': 'assignment-create-20260724-001' }, payload: { classId: '11111111-1111-4111-8111-111111111111', subjectId: '22222222-2222-4222-8222-222222222222', title: 'Kiểm tra đạo hàm', items: [{ questionVersionId: '33333333-3333-4333-8333-333333333333', position: 1, points: 1 }] } });
+    expect(assignment.statusCode).toBe(201);
+    expect(assignment.json().data).toMatchObject({ id: 'assignment-1', itemCount: 1 });
+
+    const assignmentId = '11111111-2222-4222-8222-333333333333';
+    const published = await app.inject({ method: 'POST', url: `/api/v1/assignments/${assignmentId}/publish`, headers: { cookie: 'smartpath_session=test', 'x-idempotency-key': 'assignment-publish-20260724-001' } });
+    expect(published.statusCode).toBe(200);
+    expect(published.json().data.status).toBe('PUBLISHED');
+    expect(calls).toEqual(['bank:bank-create-20260724-001', 'question:question-create-20260724-001', 'assignment:assignment-create-20260724-001', 'publish:assignment-publish-20260724-001']);
+    await app.close();
+  });
+
+  it('rejects creating an assignment with zero items and rejects an invalid assignment id when publishing', async () => {
+    const { app } = buildTestApp(teacher);
+    const noItems = await app.inject({ method: 'POST', url: '/api/v1/assignments', headers: { cookie: 'smartpath_session=test', 'x-idempotency-key': 'assignment-create-20260724-002' }, payload: { classId: '11111111-1111-4111-8111-111111111111', subjectId: '22222222-2222-4222-8222-222222222222', title: 'Kiểm tra rỗng', items: [] } });
+    expect(noItems.statusCode).toBe(422);
+
+    const badId = await app.inject({ method: 'POST', url: '/api/v1/assignments/not-a-uuid/publish', headers: { cookie: 'smartpath_session=test', 'x-idempotency-key': 'assignment-publish-20260724-002' } });
+    expect(badId.statusCode).toBe(422);
+    await app.close();
+  });
+
+  it('lets a teacher grade an essay answer and query the gradebook for their class', async () => {
+    const { app, calls } = buildTestApp(teacher);
+    const attemptId = '77777777-7777-4777-8777-777777777777';
+    const itemId = '88888888-8888-4888-8888-888888888888';
+    const graded = await app.inject({ method: 'POST', url: `/api/v1/attempts/${attemptId}/answers/${itemId}/grade`, headers: { cookie: 'smartpath_session=test', 'x-idempotency-key': 'grade-20260724-001' }, payload: { score: 8, feedback: 'Bài làm tốt, cần trình bày rõ hơn.' } });
+    expect(graded.statusCode).toBe(200);
+    expect(graded.json().data).toMatchObject({ attemptId, assignmentItemId: itemId, score: 8, fullyGraded: true });
+
+    const classId = '11111111-1111-4111-8111-111111111111';
+    const gradebook = await app.inject({ method: 'GET', url: `/api/v1/gradebook?classId=${classId}`, headers: { cookie: 'smartpath_session=test' } });
+    expect(gradebook.statusCode).toBe(200);
+    expect(gradebook.json().data).toHaveLength(1);
+    expect(calls).toEqual([`grade:grade-20260724-001`, `gradebook:${classId}`]);
     await app.close();
   });
 });

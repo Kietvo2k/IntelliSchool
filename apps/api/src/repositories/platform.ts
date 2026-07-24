@@ -38,6 +38,46 @@ export interface EnrollStudentInput {
   studentId: string;
 }
 
+export interface CreateQuestionBankInput {
+  subjectId: string;
+  name: string;
+}
+
+export interface CreateQuestionInput {
+  bankId: string;
+  type: 'MULTIPLE_CHOICE' | 'TRUE_FALSE' | 'SHORT_ANSWER' | 'ESSAY';
+  prompt: Record<string, unknown>;
+  answerKey: Record<string, unknown>;
+  rubric: Record<string, unknown>;
+  maxScore: number;
+}
+
+export interface CreateAssignmentInput {
+  classId: string;
+  subjectId: string;
+  title: string;
+  instructions: string;
+  dueAt: string | null;
+  items: Array<{ questionVersionId: string; position: number; points: number }>;
+}
+
+export interface PublishAssignmentInput {
+  assignmentId: string;
+}
+
+export interface GradeEssayInput {
+  attemptId: string;
+  assignmentItemId: string;
+  score: number;
+  feedback: string;
+}
+
+export interface GradebookQueryInput {
+  classId: string;
+  subjectId?: string;
+  studentId?: string;
+}
+
 /** Stable application boundary: the HTTP layer never issues SQL directly. */
 export interface PlatformRepository {
   getDashboard(actor: AuthContext): Promise<unknown>;
@@ -51,5 +91,11 @@ export interface PlatformRepository {
   createClass(actor: AuthContext, input: CreateClassInput, idempotencyKey: string): Promise<unknown>;
   assignClassTeacher(actor: AuthContext, input: AssignClassTeacherInput, idempotencyKey: string): Promise<unknown>;
   enrollStudent(actor: AuthContext, input: EnrollStudentInput, idempotencyKey: string): Promise<unknown>;
+  createQuestionBank(actor: AuthContext, input: CreateQuestionBankInput, idempotencyKey: string): Promise<unknown>;
+  createQuestion(actor: AuthContext, input: CreateQuestionInput, idempotencyKey: string): Promise<unknown>;
+  createAssignment(actor: AuthContext, input: CreateAssignmentInput, idempotencyKey: string): Promise<unknown>;
+  publishAssignment(actor: AuthContext, input: PublishAssignmentInput, idempotencyKey: string): Promise<unknown>;
+  gradeEssay(actor: AuthContext, input: GradeEssayInput, idempotencyKey: string): Promise<unknown>;
+  getGradebook(actor: AuthContext, input: GradebookQueryInput): Promise<unknown>;
   close?(): Promise<void>;
 }
