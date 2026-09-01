@@ -6,7 +6,8 @@ export interface TenantTransactionContext {
 }
 
 export function createPool(connectionString: string) {
-  return new pg.Pool({ connectionString, max: 10 });
+  const max = Math.max(1, Number(process.env.PG_POOL_MAX ?? 10) || 10);
+  return new pg.Pool({ connectionString, max });
 }
 
 /** Sets tenant and actor context transaction-locally so a pooled connection cannot leak scope. */

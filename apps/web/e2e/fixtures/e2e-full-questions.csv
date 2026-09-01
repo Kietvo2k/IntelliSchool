@@ -1,0 +1,2 @@
+type,prompt,choice_a,choice_b,correct_answer,max_score
+MULTIPLE_CHOICE,Đạo hàm của x³ là gì?,x²,3x²,3x²,1

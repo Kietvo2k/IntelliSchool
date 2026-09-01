@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-label="Màn đăng nhập thi thử">
+  <rect width="1440" height="900" fill="#08366a"/>
+  <polygon points="0,900 420,520 0,420" fill="#0b4a8c"/>
+  <polygon points="1440,0 980,0 1440,280" fill="#0d5cad"/>
+  <rect width="1440" height="64" fill="#0b4a8c"/>
+  <text x="24" y="40" fill="#fff" font-family="Arial" font-size="18" font-weight="700">GIAO DIỆN THI TRÊN MÁY TÍNH</text>
+  <text x="1416" y="40" fill="#fff" font-family="Arial" font-size="14" text-anchor="end">THPT Nguyễn Du</text>
+  <rect x="470" y="180" width="500" height="520" rx="8" fill="#fff"/>
+  <text x="720" y="230" text-anchor="middle" fill="#0b4a8c" font-family="Arial" font-size="14">THI THỬ CỦA TRƯỜNG</text>
+  <text x="720" y="270" text-anchor="middle" fill="#0b4a8c" font-family="Arial" font-size="20" font-weight="700">ĐĂNG NHẬP LÀM BÀI THI</text>
+  <rect x="510" y="310" width="420" height="44" fill="#f4f7fb" stroke="#c5d4e8"/>
+  <rect x="510" y="370" width="420" height="44" fill="#f4f7fb" stroke="#c5d4e8"/>
+  <rect x="510" y="430" width="420" height="44" fill="#f4f7fb" stroke="#c5d4e8"/>
+  <rect x="510" y="500" width="420" height="48" fill="#0d5cad"/>
+  <text x="720" y="530" text-anchor="middle" fill="#fff" font-family="Arial" font-size="16">Đăng nhập</text>
+</svg>

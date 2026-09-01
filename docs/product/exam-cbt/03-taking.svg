@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-label="Màn làm bài CBT">
+  <rect width="1440" height="900" fill="#e8eef6"/>
+  <polygon points="720,900 1440,640 1440,900" fill="#dce7f4"/>
+  <rect width="1440" height="56" fill="#0b4a8c"/>
+  <text x="24" y="36" fill="#fff" font-family="Arial" font-size="16" font-weight="700">GIAO DIỆN THI TRÊN MÁY TÍNH</text>
+  <rect y="56" width="1440" height="44" fill="#0d5cad"/>
+  <text x="24" y="84" fill="#fff" font-family="Arial" font-size="13">Họ tên · SBD · Toán · Timer · Đang kết nối · NỘP BÀI</text>
+  <rect y="100" width="1440" height="40" fill="#fff" stroke="#d5e0ee"/>
+  <rect x="24" y="156" width="620" height="560" fill="#fff" stroke="#d5e0ee"/>
+  <text x="48" y="196" fill="#123" font-family="Arial" font-size="16">Ngữ liệu / đoạn đọc + hình</text>
+  <rect x="64" y="220" width="540" height="200" fill="#f4f7fb" stroke="#c5d4e8"/>
+  <path d="M80 380 Q200 240 340 320 T580 280" fill="none" stroke="#08366a" stroke-width="3"/>
+  <rect x="668" y="156" width="748" height="560" fill="#fff" stroke="#d5e0ee"/>
+  <text x="692" y="196" fill="#123" font-family="Arial" font-size="16">Câu 1 · A B C D</text>
+  <rect y="740" width="1440" height="160" fill="#fff"/>
+  <circle cx="48" cy="800" r="18" fill="#2e7d32"/>
+  <circle cx="96" cy="800" r="18" fill="none" stroke="#1565c0" stroke-width="3"/>
+  <circle cx="144" cy="800" r="18" fill="#cfd8dc"/>
+</svg>

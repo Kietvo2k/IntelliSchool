@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-label="Màn kết quả thi">
+  <rect width="1440" height="900" fill="#08366a" opacity="0.55"/>
+  <rect x="420" y="240" width="600" height="360" rx="8" fill="#fff" stroke="#0b4a8c" stroke-width="3"/>
+  <text x="720" y="300" text-anchor="middle" fill="#0b4a8c" font-family="Arial" font-size="22" font-weight="700">Kết quả thi</text>
+  <text x="720" y="350" text-anchor="middle" fill="#0d5cad" font-family="Arial" font-size="18">Bạn đã nộp bài thi thành công!</text>
+  <text x="720" y="400" text-anchor="middle" fill="#123" font-family="Arial" font-size="16">Số câu đã trả lời: a/b</text>
+  <text x="720" y="440" text-anchor="middle" fill="#123" font-family="Arial" font-size="16">Số điểm đạt được</text>
+  <rect x="560" y="500" width="320" height="48" fill="#0d5cad"/>
+  <text x="720" y="530" text-anchor="middle" fill="#fff" font-family="Arial" font-size="16">Hoàn thành</text>
+</svg>

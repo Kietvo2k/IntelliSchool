@@ -1,0 +1,18 @@
+# Chạy app Docker nhưng Postgres nằm trên Supabase (tiết kiệm RAM local).
+# 1. Điền SUPABASE_* trong .env (xem .env.example).
+# 2. COMPOSE_PROFILES=  (xóa local-db)
+# 3. docker compose -f docker-compose.yml -f docker-compose.supabase.yml up --build -d
+#
+# Dùng connection string TRỰC TIẾP (db.*.supabase.co:5432, sslmode=require),
+# không dùng transaction pooler — RLS set_config cần cùng transaction/session.
+
+services:
+  postgres:
+    profiles: ["disabled"]
+
+  app:
+    environment:
+      DATABASE_BACKEND: supabase
+      PUBLIC_DATABASE_URL: ${SUPABASE_PUBLIC_DATABASE_URL}
+      API_DATABASE_URL: ${SUPABASE_API_DATABASE_URL}
+      PLATFORM_CONTROL_DATABASE_URL: ${SUPABASE_CONTROL_DATABASE_URL}

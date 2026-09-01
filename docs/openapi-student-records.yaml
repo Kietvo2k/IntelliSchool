@@ -1,0 +1,53 @@
+openapi: 3.0.3
+info:
+  title: Smart Path — học bạ số nội bộ
+  version: 0.1.0
+  description: |
+    Stub OpenAPI nội bộ. Không phải gateway công cộng. Máy chủ trường gọi
+    `GET /api/v1/internal/student-records/{studentCode}` với HMAC.
+    Header: `x-internal-timestamp`, `x-internal-hmac` = HMAC-SHA256(secret, timestamp + LF + studentCode).
+    Secret: `STUDENT_RECORDS_HMAC_SECRET` hoặc `STUDENT_IDENTITY_HMAC_SECRET`.
+    Cookie session không dùng cho cổng này.
+servers:
+  - url: http://127.0.0.1:3002
+paths:
+  /api/v1/internal/student-records/{studentCode}:
+    get:
+      summary: Điểm và lớp theo mã học sinh
+      parameters:
+        - in: path
+          name: studentCode
+          required: true
+          schema: { type: string }
+        - in: header
+          name: x-internal-timestamp
+          required: true
+          schema: { type: string }
+        - in: header
+          name: x-internal-hmac
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Hồ sơ tối thiểu
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      studentCode: { type: string }
+                      displayName: { type: string }
+                      className: { type: string, nullable: true }
+                      grades:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            subjectName: { type: string }
+                            score: { type: number }
+                            maxScore: { type: number }
+        '401': { description: HMAC không hợp lệ }
+        '503': { description: Chưa cấu hình secret }

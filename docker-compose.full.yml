@@ -1,0 +1,55 @@
+# Stack đầy đủ (MinIO + Mailpit + ClamAV) cho máy không bị giới hạn 1 CPU / 1.8GB.
+# Dùng khi phát triển trên host: docker compose -f docker-compose.full.yml up -d
+# rồi npm run dev. Không bật cùng docker-compose.yml (trùng cổng 5433).
+
+name: smartclass-platform-full
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: smartclass
+      POSTGRES_USER: smartclass
+      POSTGRES_PASSWORD: smartclass_local_only
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smartclass -d smartclass"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: smartclass
+      MINIO_ROOT_PASSWORD: smartclass_local_only
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  mailpit:
+    image: axllent/mailpit:v1.22
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  clamav:
+    image: clamav/clamav:1.4
+    ports:
+      - "3310:3310"
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping 5 || exit 1"]
+      interval: 20s
+      timeout: 15s
+      retries: 30
+
+volumes:
+  postgres-data:
+  minio-data:

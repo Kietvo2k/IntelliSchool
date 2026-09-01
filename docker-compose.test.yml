@@ -1,0 +1,108 @@
+name: smartclass-platform-test
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: smartclass
+      POSTGRES_USER: smartclass
+      POSTGRES_PASSWORD: smartclass_local_only
+    command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"]
+    ports:
+      - "15433:5432"
+    volumes:
+      - smartpath-test-postgres:/var/lib/postgresql/data
+      - ./database/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smartclass -d smartclass && test \"$(psql -U smartclass -d smartclass -tAc \"SELECT to_regclass('public.ai_tool_runs') IS NOT NULL\")\" = t"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  minio-test:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: smartclass
+      MINIO_ROOT_PASSWORD: smartclass_local_only
+    ports:
+      - "19000:9000"
+      - "19001:9001"
+    volumes:
+      - smartpath-test-minio:/data
+
+  mailpit-test:
+    image: axllent/mailpit:v1.22
+    ports:
+      - "11025:1025"
+      - "18025:8025"
+
+  clamav-test:
+    image: clamav/clamav:1.4
+    ports:
+      - "13310:3310"
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping 5 || exit 1"]
+      interval: 20s
+      timeout: 15s
+      retries: 30
+
+  app-test:
+    profiles: [e2e]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: test
+      HOST: 0.0.0.0
+      PORT: "8080"
+      COOKIE_SECURE: "false"
+      RATE_LIMIT_MAX: "400"
+      PG_POOL_MAX: "3"
+      APP_BASE_URL: http://127.0.0.1:18080
+      ALLOWED_WEB_ORIGINS: http://127.0.0.1:18080
+      WEB_DIST_DIR: /app/apps/web/dist
+      LOCAL_STORAGE_DIR: ""
+      MAIL_DIR: /data/mail
+      FILE_QUOTA_BYTES: "1073741824"
+      SEED_ON_EMPTY: "true"
+      TEST_FORCE_SEED: "true"
+      DATABASE_BACKEND: local
+      PUBLIC_DATABASE_URL: postgres://smartpath_public:smartpath_public_local_only@postgres-test:5432/smartclass
+      API_DATABASE_URL: postgres://smartpath_api:smartpath_api_local_only@postgres-test:5432/smartclass
+      PLATFORM_CONTROL_DATABASE_URL: postgres://smartpath_control:smartpath_control_local_only@postgres-test:5432/smartclass
+      SMTP_HOST: mailpit-test
+      SMTP_PORT: "1025"
+      SMTP_FROM: no-reply@smartpath.test
+      MINIO_ENDPOINT: minio-test
+      MINIO_PORT: "9000"
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: smartclass
+      MINIO_SECRET_KEY: smartclass_local_only
+      MINIO_QUARANTINE_BUCKET: smartpath-test-quarantine
+      MINIO_READY_BUCKET: smartpath-test-resources
+      CLAMAV_HOST: clamav-test
+      CLAMAV_PORT: "3310"
+      STUDENT_IDENTITY_HMAC_SECRET: test-only-student-identity-secret
+      FILE_SIGNING_SECRET: test-only-file-signing-secret
+      NODE_OPTIONS: --max-old-space-size=768
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      clamav-test:
+        condition: service_healthy
+    ports:
+      - "18080:8080"
+    volumes:
+      - smartpath-test-app:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+
+volumes:
+  smartpath-test-postgres:
+  smartpath-test-minio:
+  smartpath-test-app:

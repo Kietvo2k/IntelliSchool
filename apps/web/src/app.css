@@ -1,0 +1,103 @@
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme' layer(theme);
+@import 'tailwindcss/utilities' layer(utilities);
+
+@theme {
+  --font-display: 'Calistoga', Georgia, serif;
+  --font-sans: 'DM Sans', sans-serif;
+  --color-ink: #20241e;
+  --color-paper: #fbfaf4;
+  --color-cream: #f0eddf;
+  --color-line: #d7d4c7;
+  --color-green: #1e543c;
+  --color-green-dark: #113525;
+  --color-lime: #d7ed8a;
+  --color-orange: #ec7249;
+  --color-muted: #62685f;
+  --color-surface: #fffffa;
+}
+
+.ws-input,
+.ws-select,
+.ws-textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #c9d5c5;
+  border-radius: 9px;
+  color: var(--color-ink);
+  background: white;
+  font: inherit;
+  transition: border-color 260ms ease, box-shadow 360ms cubic-bezier(0.25, 1, 0.4, 1), background-color 260ms ease;
+}
+.ws-input:focus,
+.ws-select:focus,
+.ws-textarea:focus {
+  border-color: var(--color-green);
+  box-shadow: 0 0 0 4px rgba(30, 84, 60, 0.12);
+  outline: none;
+}
+.ws-textarea {
+  min-height: 7rem;
+  resize: vertical;
+}
+.ws-btn {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  padding: 0.7rem 1.15rem;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  font: inherit;
+  transition: transform 260ms cubic-bezier(0.25, 1, 0.4, 1),
+              background-color 260ms ease,
+              box-shadow 360ms cubic-bezier(0.25, 1, 0.4, 1),
+              border-color 260ms ease;
+  will-change: transform;
+}
+.ws-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px -4px rgba(30, 84, 60, 0.2);
+}
+.ws-btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.96) !important;
+  box-shadow: 0 2px 6px rgba(30, 84, 60, 0.12) !important;
+  transition-duration: 90ms !important;
+}
+.ws-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+.ws-btn-primary {
+  color: white;
+  background: var(--color-green);
+}
+.ws-btn-primary:hover:not(:disabled) {
+  background: var(--color-green-dark);
+  box-shadow: 0 12px 24px -4px rgba(30, 84, 60, 0.28);
+}
+.ws-btn-quiet {
+  color: var(--color-green);
+  background: #eff4d7;
+}
+.ws-btn-quiet:hover:not(:disabled) {
+  background: #e4edbd;
+}
+.ws-label {
+  display: block;
+  color: #43503f;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.ws-field {
+  display: grid;
+  gap: 0.35rem;
+}
+.text-muted {
+  color: var(--color-muted);
+}

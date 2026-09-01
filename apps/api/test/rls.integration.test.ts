@@ -9,6 +9,7 @@ const controlPool = new pg.Pool({ connectionString: controlUrl });
 const apiPool = new pg.Pool({ connectionString: apiUrl });
 let schoolOneId = '';
 let schoolTwoId = '';
+let schoolTwoMemberId = '';
 
 describe('PostgreSQL tenant isolation', () => {
   beforeAll(async () => {
@@ -16,6 +17,8 @@ describe('PostgreSQL tenant isolation', () => {
     const schools = await controlPool.query<{ id: string; code: string }>(`SELECT id, code FROM schools WHERE code IN ('SP-PILOT001', 'SP-PILOT002') ORDER BY code`);
     schoolOneId = schools.rows[0]!.id;
     schoolTwoId = schools.rows[1]!.id;
+    const schoolTwoMember = await controlPool.query<{ user_id: string }>('SELECT user_id FROM school_memberships WHERE school_id = $1 ORDER BY user_id LIMIT 1', [schoolTwoId]);
+    schoolTwoMemberId = schoolTwoMember.rows[0]!.user_id;
   });
   afterAll(async () => { await Promise.all([controlPool.end(), apiPool.end()]); });
 
@@ -26,5 +29,11 @@ describe('PostgreSQL tenant isolation', () => {
     });
     expect(classRows.rows).toEqual([{ school_id: schoolOneId }]);
     expect(classRows.rows.map((row) => row.school_id)).not.toContain(schoolTwoId);
+  });
+
+  it('limits the tenant directory to members of the active school', async () => {
+    const userRows = await withTenantTransaction(apiPool, { schoolId: schoolOneId }, async (client) => client.query<{ id: string }>('SELECT id FROM users ORDER BY id'));
+    expect(userRows.rows.length).toBeGreaterThan(0);
+    expect(userRows.rows.map((row) => row.id)).not.toContain(schoolTwoMemberId);
   });
 });

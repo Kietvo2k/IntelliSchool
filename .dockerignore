@@ -1,0 +1,15 @@
+.git
+.env
+.env.*
+!.env.example
+node_modules
+apps/*/node_modules
+apps/*/dist
+packages/*/dist
+*.log
+coverage
+playwright-report
+test-results
+**/.DS_Store
+Dockerfile
+docker-compose*.yml

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-label="Màn sảnh thi thử">
+  <rect width="1440" height="900" fill="#e8eef6"/>
+  <polygon points="0,900 420,520 0,420" fill="#d5e3f4"/>
+  <polygon points="1440,0 980,0 1440,280" fill="#c5d8ef"/>
+  <rect width="1440" height="64" fill="#0b4a8c"/>
+  <text x="24" y="40" fill="#fff" font-family="Arial" font-size="18" font-weight="700">GIAO DIỆN THI TRÊN MÁY TÍNH</text>
+  <text x="1416" y="40" fill="#fff" font-family="Arial" font-size="14" text-anchor="end">THPT Nguyễn Du</text>
+  <text x="48" y="120" fill="#0b4a8c" font-family="Arial" font-size="22" font-weight="700">Thi thử Toán trường</text>
+  <rect x="48" y="150" width="640" height="180" rx="6" fill="#fff" stroke="#0b4a8c"/>
+  <text x="72" y="186" fill="#0b4a8c" font-family="Arial" font-size="16" font-weight="700">Thông tin thí sinh</text>
+  <rect x="752" y="150" width="640" height="180" rx="6" fill="#fff" stroke="#0b4a8c"/>
+  <text x="776" y="186" fill="#0b4a8c" font-family="Arial" font-size="16" font-weight="700">Hội đồng thi</text>
+  <rect x="48" y="360" width="400" height="120" rx="6" fill="#fff" stroke="#c5d4e8"/>
+  <text x="72" y="400" fill="#123" font-family="Arial" font-size="16">Toán học</text>
+  <rect x="300" y="430" width="120" height="32" rx="16" fill="#0d5cad"/>
+  <text x="360" y="452" text-anchor="middle" fill="#fff" font-family="Arial" font-size="13">Vào thi</text>
+</svg>

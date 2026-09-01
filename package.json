@@ -1,23 +1,44 @@
 {
-    "name":  "smart-path-platform",
-    "version":  "0.1.0",
-    "private":  true,
-    "packageManager":  "npm@10.9.4",
-    "workspaces":  [
-                       "apps/*",
-                       "packages/*"
-                   ],
-    "scripts":  {
-                    "dev":  "concurrently -n api,web -c cyan,magenta \"npm run dev -w @smart-path/api\" \"npm run dev -w @smart-path/web\"",
-                    "test":  "npm run test -w @smart-path/api",
-                    "build":  "npm run build -w @smart-path/contracts \u0026\u0026 npm run build -w @smart-path/api \u0026\u0026 npm run build -w @smart-path/web",
-                    "typecheck":  "npm run typecheck -w @smart-path/contracts \u0026\u0026 npm run typecheck -w @smart-path/api \u0026\u0026 npm run typecheck -w @smart-path/web",
-                    "db:seed":  "npm run db:seed -w @smart-path/api"
-                },
-    "devDependencies":  {
-                            "concurrently":  "^9.2.1"
-                        },
-    "engines":  {
-                    "node":  "\u003e=22.0.0"
-                }
+    "name": "smart-path-platform",
+    "version": "0.1.0",
+    "private": true,
+    "packageManager": "npm@10.9.4",
+    "workspaces": [
+        "apps/*",
+        "packages/*"
+    ],
+    "scripts": {
+        "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w @smart-path/api\" \"npm run dev -w @smart-path/web\"",
+        "test": "npm run test:unit",
+        "test:unit": "npm run test -w @smart-path/api -- --exclude test/auth.test.ts --exclude test/**/*.integration.test.ts --exclude test/**/*.e2e.test.ts",
+        "test:integration": "npm run test -w @smart-path/api -- --maxWorkers=1 --no-file-parallelism --hookTimeout=120000 test/auth.test.ts test/rls.integration.test.ts test/platform-admin-bootstrap.integration.test.ts test/resources.integration.test.ts test/resource-scan-jobs.integration.test.ts test/resource-scan.e2e.test.ts test/question-versions.integration.test.ts test/question-search.integration.test.ts test/question-import.integration.test.ts test/lesson-lifecycle.integration.test.ts test/assignment-lifecycle.integration.test.ts test/exam.integration.test.ts test/dashboard.integration.test.ts test/report-export-jobs.integration.test.ts test/skill-graph.integration.test.ts test/adaptive.integration.test.ts test/career.integration.test.ts test/rag.integration.test.ts test/billing.integration.test.ts",
+        "test:web": "npm run test -w @smart-path/web",
+        "test:e2e": "npm run test:web",
+        "test:stack:up": "docker compose -f docker-compose.test.yml up --build --wait",
+        "test:e2e:stack:build": "docker compose -f docker-compose.test.yml --profile e2e up --build --wait app-test",
+        "test:e2e:stack:up": "docker compose -f docker-compose.test.yml --profile e2e up --no-build --wait app-test",
+        "test:stack:down": "docker compose -f docker-compose.test.yml --profile e2e down --volumes --remove-orphans",
+        "test:integration:isolated": "node scripts/with-test-env.mjs npm run test:integration",
+        "test:e2e:isolated": "npm run test:e2e:stack:build && node scripts/with-test-env.mjs npm run test:e2e:browser -w @smart-path/web",
+        "test:release:isolated": "node scripts/run-release-check.mjs",
+        "lint": "eslint apps/api/src apps/api/test apps/web/src apps/web/e2e --max-warnings 0",
+        "verify": "npm run lint && npm run typecheck && npm run test:unit && npm run test:web && npm run build",
+        "build": "npm run build -w @smart-path/contracts && npm run build -w @smart-path/api && npm run build -w @smart-path/web && npm run check:bundle",
+        "check:bundle": "node scripts/check-bundle.mjs",
+        "typecheck": "npm run typecheck -w @smart-path/contracts && npm run typecheck -w @smart-path/api && npm run typecheck -w @smart-path/web",
+        "db:seed": "npm run db:seed -w @smart-path/api",
+        "db:seed:demo": "npm run db:seed:demo -w @smart-path/api"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.39.5",
+        "concurrently": "^9.2.1",
+        "eslint": "^9.39.5",
+        "eslint-plugin-react-hooks": "^5.2.0",
+        "eslint-plugin-react-refresh": "^0.5.5",
+        "globals": "^17.11.0",
+        "typescript-eslint": "^8.68.0"
+    },
+    "engines": {
+        "node": ">=22.0.0"
+    }
 }

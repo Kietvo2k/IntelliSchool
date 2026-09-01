@@ -7,6 +7,7 @@ export interface AuthContext {
   schoolId?: string;
   email: string;
   displayName: string;
+  homeroomClassIds?: string[];
 }
 
 export interface SchoolRequest {

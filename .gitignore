@@ -1,5 +1,12 @@
 ﻿.env
 .env.local
+.env.test
+.env.*.local
 *.log
+.self-eval-scores.jsonl
 apps/*/dist/
+apps/web/playwright-report/
+apps/web/test-results/
+apps/web/coverage/
+apps/api/coverage/
 node_modules/

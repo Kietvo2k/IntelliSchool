@@ -18,7 +18,7 @@ CREATE INDEX idx_idempotency_school_created
 ALTER TABLE idempotency_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE idempotency_records FORCE ROW LEVEL SECURITY;
 GRANT SELECT, INSERT, UPDATE, DELETE ON idempotency_records TO smartpath_api;
-GRANT SELECT, INSERT, UPDATE, DELETE ON idempotency_records TO smartpath_control;
+GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON idempotency_records TO smartpath_control;
 CREATE POLICY idempotency_records_tenant ON idempotency_records FOR ALL TO smartpath_api
   USING (school_id = app_current_school_id())
   WITH CHECK (school_id = app_current_school_id());

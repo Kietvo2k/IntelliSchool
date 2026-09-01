@@ -1,33 +1,45 @@
 {
-    "name":  "@smart-path/api",
-    "version":  "0.1.0",
-    "private":  true,
-    "type":  "module",
-    "scripts":  {
-                    "dev":  "node --env-file=../../.env --import tsx --watch src/server.ts",
-                    "start":  "node --env-file=../../.env dist/server.js",
-                    "build":  "tsc -p tsconfig.json",
-                    "typecheck":  "tsc --noEmit -p tsconfig.json",
-                    "test":  "vitest run",
-                    "db:migrate":  "node-pg-migrate -m ../../database/migrations",
-                    "db:seed":  "node --env-file=../../.env --import tsx src/seed-pilot.ts"
-                },
-    "dependencies":  {
-                         "@fastify/cookie":  "^11.0.2",
-                         "@fastify/cors":  "^11.3.0",
-                         "@fastify/helmet":  "^12.0.1",
-                         "@fastify/rate-limit":  "^10.2.1",
-                         "@smart-path/contracts":  "*",
-                         "fastify":  "^5.2.1",
-                         "node-pg-migrate":  "^9.0.0",
-                         "pg":  "^8.13.3",
-                         "zod":  "^3.24.2"
-                     },
-    "devDependencies":  {
-                            "@types/node":  "^22.13.4",
-                            "@types/pg":  "^8.11.11",
-                            "tsx":  "^4.19.3",
-                            "typescript":  "^5.7.3",
-                            "vitest":  "^3.0.7"
-                        }
+    "name": "@smart-path/api",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "node --env-file=../../.env --import tsx --watch src/server.ts",
+        "start": "node --env-file=../../.env dist/server.js",
+        "build": "tsc -p tsconfig.json",
+        "typecheck": "tsc --noEmit -p tsconfig.json",
+        "test": "vitest run",
+        "db:migrate": "node-pg-migrate -m ../../database/migrations",
+        "db:seed": "node --env-file=../../.env --import tsx src/seed-pilot.ts",
+        "db:seed:demo": "node --env-file=../../.env --import tsx src/seed-demo-data.ts",
+        "db:reset:pilot-exams": "node --env-file=../../.env --import tsx src/reset-pilot-exams.ts",
+        "bootstrap:platform-admin": "node --env-file=../../.env --import tsx src/bootstrap-platform-admin.ts",
+        "worker:resource-scan": "node --env-file=../../.env --import tsx src/resource-scan-worker.ts",
+        "worker:report-export": "node --env-file=../../.env --import tsx src/report-export-worker.ts"
+    },
+    "dependencies": {
+        "@fastify/cookie": "^11.0.2",
+        "@fastify/cors": "^11.3.0",
+        "@fastify/helmet": "^12.0.1",
+        "@fastify/multipart": "^9.4.0",
+        "@fastify/rate-limit": "^10.2.1",
+        "@fastify/static": "^10.1.3",
+        "@smart-path/contracts": "*",
+        "fastify": "^5.2.1",
+        "file-type": "^22.0.1",
+        "minio": "^8.0.7",
+        "node-pg-migrate": "^9.0.0",
+        "pg": "^8.13.3",
+        "sanitize-html": "^2.17.7",
+        "xlsx-populate": "^1.21.0",
+        "zod": "^3.24.2"
+    },
+    "devDependencies": {
+        "@types/node": "^22.13.4",
+        "@types/pg": "^8.11.11",
+        "@types/sanitize-html": "^2.16.1",
+        "tsx": "^4.19.3",
+        "typescript": "^5.7.3",
+        "vitest": "^3.0.7"
+    }
 }

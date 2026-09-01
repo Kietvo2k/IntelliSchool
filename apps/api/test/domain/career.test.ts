@@ -1,5 +1,5 @@
 ﻿import { describe, expect, it } from 'vitest';
-import { estimateAdmissionProbability, rankCareerMatches, scoreRiasecAnswers } from '../../src/domain/career/scoring.js';
+import { computeAcademicScores, estimateAdmissionProbability, rankCareerMatches, scoreExtracurricularText, scoreRiasecAnswers } from '../../src/domain/career/scoring.js';
 
 describe('career guidance scoring', () => {
   it('produces a stable RIASEC code and ranks a matching career without presenting it as a decision', () => {
@@ -15,9 +15,26 @@ describe('career guidance scoring', () => {
   });
 
   it('estimates admission probability from historical cutoffs with a visible uncertainty disclaimer', () => {
-    const result = estimateAdmissionProbability({ applicantScore: 26, cutoffs: [24.5, 25, 25.5] });
+    const result = estimateAdmissionProbability({ applicantScore: 28, cutoffs: [24.5, 25, 25.5] });
     expect(result).toMatchObject({ category: 'SAFE', yearsOfData: 3 });
     expect(result.probability).toBeGreaterThan(0.8);
     expect(result.disclaimer).toContain('không phải cam kết');
+  });
+
+  it('does not extrapolate a projected cutoff beyond the observed range by more than one point', () => {
+    const result = estimateAdmissionProbability({ applicantScore: 25, cutoffs: [20, 40, 80] });
+    expect(result.predictedCutoff).toBe(81);
+  });
+
+  it('splits classroom grades into science and social without treating them as university blocks', () => {
+    const academics = computeAcademicScores({ math: 9, physics: 8, chemistry: 8, biology: 7, literature: 6, history: 5, geography: 5, civicEducation: 6 });
+    expect(academics.science).toBeGreaterThan(academics.social);
+    expect(academics.overall).toBeGreaterThan(0.5);
+  });
+
+  it('scores extracurricular text as a bounded bonus, not an admission block', () => {
+    const bonus = scoreExtracurricularText({ a: 'Em là trưởng nhóm tình nguyện và đạt giải nhất học sinh giỏi.' });
+    expect(bonus).toBeGreaterThan(0);
+    expect(bonus).toBeLessThanOrEqual(0.2);
   });
 });

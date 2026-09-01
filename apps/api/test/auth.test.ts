@@ -41,9 +41,12 @@ describe('authentication boundary', () => {
     const login = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: pilotAccounts.platformAdmin });
     const created = await app.inject({ method: 'POST', url: '/api/v1/public/school-requests', payload: { schoolName: 'THPT Hoàng Văn Thụ', principalName: 'Đặng Minh Châu', principalEmail: 'chau.hoangvanthu@example.test', province: 'Quảng Nam' } });
     expect(created.statusCode).toBe(201);
-    const approved = await app.inject({ method: 'POST', url: `/api/v1/admin/school-requests/${created.json().data.id}/approve`, headers: { cookie: sessionCookie(login) }, payload: { reason: 'Duyệt cho pilot mở rộng.' } });
+    const approved = await app.inject({ method: 'POST', url: `/api/v1/admin/school-requests/${created.json().data.id}/approve`, headers: { cookie: sessionCookie(login), origin: 'http://127.0.0.1:5176', 'x-idempotency-key': 'school-approve-auth-test-001' }, payload: { reason: 'Duyệt cho pilot mở rộng.' } });
     expect(approved.statusCode).toBe(200);
     expect(approved.json().data.school.code).toMatch(/^SP-[A-Z0-9]{8}$/);
+    const replay = await app.inject({ method: 'POST', url: `/api/v1/admin/school-requests/${created.json().data.id}/approve`, headers: { cookie: sessionCookie(login), origin: 'http://127.0.0.1:5176', 'x-idempotency-key': 'school-approve-auth-test-001' }, payload: { reason: 'Duyệt cho pilot mở rộng.' } });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().data.school.id).toBe(approved.json().data.school.id);
   });
 });
 

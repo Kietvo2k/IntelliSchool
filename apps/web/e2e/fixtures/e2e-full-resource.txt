@@ -1,0 +1,2 @@
+Tài nguyên kiểm thử E2E toàn bộ Smart Path.
+Nội dung này chỉ dùng trên Docker test stack cô lập.

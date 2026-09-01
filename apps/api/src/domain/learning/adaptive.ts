@@ -1,4 +1,6 @@
-﻿export interface LearningEvent {
+﻿import { directPrerequisites, topologicalOrder, type SkillGraphDefinition } from './graph.js';
+
+export interface LearningEvent {
   id: string;
   skillCode: string;
   correct: boolean;
@@ -49,6 +51,109 @@ export function buildAdaptiveInsight(input: {
     .sort(([leftSkill, leftEvents], [rightSkill, rightEvents]) => rightEvents.length - leftEvents.length || leftSkill.localeCompare(rightSkill))[0];
   if (!selected) return { mode: 'REPORT_ONLY', rootSkillCode: null, evidenceEventIds: [], reasonCodes: ['INSUFFICIENT_DIRECT_EVIDENCE'], teacherOverrideRequired: false };
   return { mode: 'ACTIONABLE_SUGGESTION', rootSkillCode: selected[0], evidenceEventIds: selected[1].map((event) => event.id).sort(), reasonCodes: ['APPROVED_EVIDENCE_PATTERN'], teacherOverrideRequired: false };
+}
+
+export type DiagnosisStatus = 'ACTIONABLE' | 'NEEDS_MORE_EVIDENCE' | 'ON_TRACK';
+
+export interface SkillGapSummary {
+  skillCode: string;
+  incorrectCount: number;
+  totalCount: number;
+  evidenceEventIds: string[];
+}
+
+export interface RootCauseDiagnosis {
+  status: DiagnosisStatus;
+  rootSkillCode: string | null;
+  /** Kỹ năng đã đủ bằng chứng sai (>= minEvidence), xếp theo thứ tự tiên quyết. */
+  affectedSkills: SkillGapSummary[];
+  /** Kỹ năng có dấu hiệu sai nhưng chưa đủ bằng chứng để kết luận. */
+  suspectedSkills: SkillGapSummary[];
+  evidenceEventIds: string[];
+  reasonCodes: string[];
+}
+
+/**
+ * Chẩn đoán lỗ hổng gốc trên đồ thị đã duyệt: tìm kỹ năng TIÊN QUYẾT SỚM NHẤT (theo
+ * thứ tự tô-pô) có đủ bằng chứng sai. Khi chỉ có bằng chứng lẻ tẻ (< minEvidence) thì
+ * trả NEEDS_MORE_EVIDENCE thay vì gán nhãn học sinh. Hoàn toàn tất định.
+ */
+export function diagnoseRootCause(input: {
+  graph: SkillGraphDefinition;
+  events: readonly LearningEvent[];
+  minEvidence?: number;
+}): RootCauseDiagnosis {
+  const minEvidence = input.minEvidence ?? 2;
+  if (!Number.isInteger(minEvidence) || minEvidence < 1) throw new Error('minEvidence must be a positive integer');
+
+  const graphSkills = new Set(input.graph.skills.map((skill) => skill.code));
+  const perSkill = new Map<string, { incorrect: LearningEvent[]; total: number }>();
+  for (const event of input.events) {
+    if (!event.id || !event.skillCode || !Number.isFinite(Date.parse(event.occurredAt))) throw new Error('Learning evidence is incomplete');
+    if (!graphSkills.has(event.skillCode)) continue; // chỉ xét kỹ năng thuộc đồ thị đã duyệt
+    const bucket = perSkill.get(event.skillCode) ?? { incorrect: [], total: 0 };
+    bucket.total += 1;
+    if (!event.correct) bucket.incorrect.push(event);
+    perSkill.set(event.skillCode, bucket);
+  }
+
+  const order = topologicalOrder(input.graph);
+  const rank = new Map(order.map((code, index) => [code, index]));
+  const toSummary = (skillCode: string, bucket: { incorrect: LearningEvent[]; total: number }): SkillGapSummary => ({
+    skillCode,
+    incorrectCount: bucket.incorrect.length,
+    totalCount: bucket.total,
+    evidenceEventIds: bucket.incorrect.map((event) => event.id).sort(),
+  });
+
+  const affected: SkillGapSummary[] = [];
+  const suspected: SkillGapSummary[] = [];
+  for (const [skillCode, bucket] of perSkill) {
+    if (bucket.incorrect.length === 0) continue;
+    if (bucket.incorrect.length >= minEvidence) affected.push(toSummary(skillCode, bucket));
+    else suspected.push(toSummary(skillCode, bucket));
+  }
+  const byPrerequisite = (left: SkillGapSummary, right: SkillGapSummary) =>
+    (rank.get(left.skillCode) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right.skillCode) ?? Number.MAX_SAFE_INTEGER)
+    || left.skillCode.localeCompare(right.skillCode);
+  affected.sort(byPrerequisite);
+  suspected.sort(byPrerequisite);
+
+  if (affected.length === 0) {
+    return {
+      status: suspected.length > 0 ? 'NEEDS_MORE_EVIDENCE' : 'ON_TRACK',
+      rootSkillCode: null,
+      affectedSkills: [],
+      suspectedSkills: suspected,
+      evidenceEventIds: [],
+      reasonCodes: suspected.length > 0 ? ['INSUFFICIENT_DIRECT_EVIDENCE'] : ['NO_GAP_DETECTED'],
+    };
+  }
+
+  const root = affected[0]!;
+  return {
+    status: 'ACTIONABLE',
+    rootSkillCode: root.skillCode,
+    affectedSkills: affected,
+    suspectedSkills: suspected,
+    evidenceEventIds: root.evidenceEventIds,
+    reasonCodes: ['APPROVED_EVIDENCE_PATTERN'],
+  };
+}
+
+/**
+ * Lộ trình ôn tập: các kỹ năng cần ôn được xếp theo thứ tự tiên quyết, không bao giờ
+ * hiện một kỹ năng trước khi tiên quyết (cũng đang cần ôn) của nó xuất hiện.
+ */
+export function planRemediationPath(input: {
+  graph: SkillGraphDefinition;
+  gapSkillCodes: readonly string[];
+}): Array<{ skillCode: string; unmetPrerequisites: string[] }> {
+  const gaps = new Set(input.gapSkillCodes.filter((code) => code));
+  const order = topologicalOrder(input.graph);
+  return order
+    .filter((code) => gaps.has(code))
+    .map((code) => ({ skillCode: code, unmetPrerequisites: directPrerequisites(input.graph, code).filter((prerequisite) => gaps.has(prerequisite)) }));
 }
 
 export function buildReviewSchedule(input: { sourceEventId: string; skillCode: string; occurredAt: string; correct: boolean; previousIntervalDays?: 1 | 3 | 7 | 14 | 30 }): ReviewSchedule {
