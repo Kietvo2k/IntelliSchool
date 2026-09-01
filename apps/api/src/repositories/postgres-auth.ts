@@ -65,7 +65,9 @@ export class PostgresAuthRepository {
     }
 
     await this.pool.query('UPDATE password_credentials SET failed_login_count = 0, locked_until = NULL WHERE user_id = $1', [user.id]);
-    return this.createSession(await this.withHomeroom(toContext(user)));
+    const session = await this.createSession(await this.withHomeroom(toContext(user)));
+    await this.pool.query(`INSERT INTO audit_events (school_id, actor_id, action, target_type, target_id, metadata) VALUES ($1, $2, 'AUTH_LOGIN_SUCCEEDED', 'user', $3::text, '{}'::jsonb)`, [session.user.schoolId ?? null, session.user.userId, session.user.userId]);
+    return session;
   }
 
   async getSession(token: string): Promise<AuthContext | null> {
@@ -93,8 +95,21 @@ export class PostgresAuthRepository {
     return this.withHomeroom(toContext(user));
   }
 
-  async revokeSession(token: string): Promise<void> {
-    await this.pool.query('UPDATE sessions SET revoked_at = COALESCE(revoked_at, now()) WHERE token_hash = $1', [hashToken(token)]);
+  async revokeSession(token: string, idempotencyKey = `logout-${hashToken(token).toString('hex')}`): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const session = await client.query<{ id: string; user_id: string; active_school_id: string | null }>('SELECT id, user_id, active_school_id FROM sessions WHERE token_hash = $1 FOR UPDATE', [hashToken(token)]);
+      const row = session.rows[0];
+      if (row) {
+        await this.idempotent(client, row.user_id, 'SESSION_LOGOUT', idempotencyKey, { tokenHash: hashToken(token).toString('hex') }, async () => {
+          await client.query('UPDATE sessions SET revoked_at = COALESCE(revoked_at, now()) WHERE id = $1', [row.id]);
+          await client.query(`INSERT INTO audit_events (school_id, actor_id, action, target_type, target_id, metadata) VALUES ($1, $2, 'AUTH_LOGOUT', 'session', $3, '{}'::jsonb)`, [row.active_school_id, row.user_id, row.id]);
+          return { revoked: true };
+        });
+      }
+      await client.query('COMMIT');
+    } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   }
 
   async listSessions(userId: string, currentToken: string): Promise<Array<{ id: string; current: boolean; createdAt: string; lastSeenAt: string; expiresAt: string }>> {
@@ -156,6 +171,7 @@ export class PostgresAuthRepository {
       INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
       VALUES ($1, $2, now() + interval '30 minutes')
     `, [userId, hashToken(token)]);
+    await this.pool.query(`INSERT INTO audit_events (school_id, actor_id, action, target_type, target_id, metadata) VALUES ((SELECT school_id FROM school_memberships WHERE user_id = $1 ORDER BY created_at LIMIT 1), $1, 'PASSWORD_RESET_REQUESTED', 'user', $2::text, '{}'::jsonb)`, [userId, userId]);
     if (this.mailer) await this.mailer.sendPasswordReset({ to: email.trim().toLowerCase(), token });
     return token;
   }
@@ -178,6 +194,7 @@ export class PostgresAuthRepository {
       `, [reset.user_id, await hashPassword(password)]);
       await client.query('UPDATE password_reset_tokens SET used_at = now() WHERE id = $1', [reset.id]);
       await client.query('UPDATE sessions SET revoked_at = COALESCE(revoked_at, now()) WHERE user_id = $1', [reset.user_id]);
+      await client.query(`INSERT INTO audit_events (school_id, actor_id, action, target_type, target_id, metadata) VALUES ((SELECT school_id FROM school_memberships WHERE user_id = $1 ORDER BY created_at LIMIT 1), $1, 'PASSWORD_RESET_COMPLETED', 'user', $2::text, '{}'::jsonb)`, [reset.user_id, reset.user_id]);
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');

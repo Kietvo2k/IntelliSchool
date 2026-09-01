@@ -79,6 +79,17 @@ describe('authentication boundary', () => {
     expect(JSON.stringify(approved)).not.toContain('token');
     await repository.close?.();
   });
+
+  it('audits logout while keeping the endpoint idempotent without a client key', async () => {
+    const login = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: pilotAccounts.studentMai });
+    expect(login.statusCode).toBe(200);
+    const cookie = sessionCookie(login);
+    const actor = await authRepository.getSession(cookie.split('=', 2)[1]!);
+    const logout = await app.inject({ method: 'POST', url: '/api/v1/auth/logout', headers: { cookie } });
+    expect(logout.statusCode).toBe(204);
+    const audit = await controlPool.query<{ action: string }>("SELECT action FROM audit_events WHERE actor_id = $1 AND action = 'AUTH_LOGOUT' ORDER BY created_at DESC LIMIT 1", [actor!.userId]);
+    expect(audit.rows).toEqual([{ action: 'AUTH_LOGOUT' }]);
+  });
 });
 
 
