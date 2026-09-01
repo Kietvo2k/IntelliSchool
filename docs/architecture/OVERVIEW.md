@@ -39,3 +39,10 @@ lớp phòng vệ cuối, không thay thế authorization ở route/repository.
 
 Xem ADR-001 đến ADR-003 trong \`docs/decisions/\`. Chỉ Phase 2/3 mới được đổi
 API/schema liên quan; Phase 1 không lách thay đổi backend để che lỗi UX.
+
+## Phase 2 security boundary
+
+- Exam publish ghi snapshot AES-256-GCM append-only; assignment và session pin revision cụ thể.
+- Keyring không nằm trong repo/database; server fail-closed khi không giải mã được snapshot.
+- Student API map từ snapshot đã giải mã và loại bỏ answer key/rubric; grading/proctor chỉ xử lý server-side.
+- Integrity incident và unlock/restore đều tenant-scoped, idempotent và audit trong transaction.

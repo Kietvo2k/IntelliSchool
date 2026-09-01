@@ -49,6 +49,15 @@ metadata và reference assignment/version.
   bao giờ nhận answer key/rubric.
 - Migration forward-only, backfill idempotent, audit key rotation và test rollback.
 
+## Contract đã triển khai
+
+- `POST /api/v1/exams/integrity` yêu cầu `X-Idempotency-Key`; server tạo `incidentId` và dedupe blur/visibility/fullscreen cùng incident.
+- `POST /api/v1/exams/sessions/:id/integrity/restore` dành cho học sinh khi phục hồi focus/fullscreen.
+- `POST /api/v1/exams/sessions/:id/integrity/close` dành cho teacher/owner/proctor với `incidentId`, `reason`, idempotency và audit.
+- `POST /api/v1/exams/sessions/:id/unlock` dành cho teacher/owner/proctor với `reason`; không xóa event và không tự nộp bài.
+- Heartbeat và session response trả `serverNow`, `state`, `incidentId`, `graceEndsAt`, `lockAt`, `remainingMs`, `lockedAt`.
+- Snapshot keyring đọc từ file ngoài repo; thiếu key, sai metadata hash hoặc auth tag đều trả lỗi fail-closed.
+
 ## Kịch bản phải kiểm
 
 4,9s grace, 5s warning, 29,9s còn mở, 30s lock, restore, duplicate signal,
