@@ -1,58 +1,55 @@
 import { describe, expect, it } from 'vitest';
-import { countConfirmedIntegrityStrikes, integrityStatus, shouldLockExam, classifyIntegrityIncident } from '../../src/domain/exam/integrity.js';
+import {
+  closeIntegrityIncident,
+  createIntegrityIncident,
+  evaluateIntegrityIncident,
+  classifyIntegritySignal,
+  signalBelongsToIncident,
+} from '../../src/domain/exam/integrity.js';
 
-describe('exam integrity debounce', () => {
-  it('ignores tab events that arrive within one second of the previous strike', () => {
-    const count = countConfirmedIntegrityStrikes([
-      { kind: 'visibilitychange', occurredAt: 1_000 },
-      { kind: 'blur', occurredAt: 1_400 },
-      { kind: 'visibilitychange', occurredAt: 2_200 },
-    ]);
-    expect(count).toBe(2);
+describe('server-authoritative exam integrity incidents', () => {
+  it('keeps an incident in grace at 4.9 seconds', () => {
+    const incident = createIntegrityIncident('incident-1', 0);
+
+    expect(evaluateIntegrityIncident(incident, 4_900)).toMatchObject({ state: 'GRACE', remainingMs: 100, locked: false });
   });
 
-  it('locks after three confirmed strikes', () => {
-    const events = [0, 2_000, 4_000].map((occurredAt) => ({ kind: 'visibilitychange', occurredAt }));
-    expect(countConfirmedIntegrityStrikes(events)).toBe(3);
-    expect(shouldLockExam(3)).toBe(true);
-    expect(shouldLockExam(2)).toBe(false);
+  it('enters warning exactly at 5 seconds', () => {
+    const incident = createIntegrityIncident('incident-1', 0);
+
+    expect(evaluateIntegrityIncident(incident, 5_000)).toMatchObject({ state: 'WARNING', remainingMs: 25_000, locked: false });
   });
 
-  it('reports warnings remaining without treating a network failure as a strike', () => {
-    expect(integrityStatus(0)).toEqual({ strikeCount: 0, warningsRemaining: 3, locked: false });
-    expect(integrityStatus(2)).toEqual({ strikeCount: 2, warningsRemaining: 1, locked: false });
-    expect(integrityStatus(3)).toEqual({ strikeCount: 3, warningsRemaining: 0, locked: true });
+  it('keeps warning open at 29.9 seconds', () => {
+    const incident = createIntegrityIncident('incident-1', 0);
+
+    expect(evaluateIntegrityIncident(incident, 29_900)).toMatchObject({ state: 'WARNING', remainingMs: 100, locked: false });
   });
 
-  it('does not count an attachment picker event only when the server marks it exempt', () => {
-    expect(classifyIntegrityIncident({
-      kind: 'visibilitychange',
-      occurredAt: 10_000,
-      payload: { state: 'hidden', _serverAttachmentExemption: true },
-    })).toEqual({ counted: false, reason: 'ATTACHMENT_PICKER' });
-    expect(classifyIntegrityIncident({
-      kind: 'visibilitychange',
-      occurredAt: 10_000,
-      payload: { state: 'hidden', reason: 'attachment_picker', attachmentExemption: true },
-    })).toEqual({ counted: true, reason: 'FOCUS_LOSS' });
+  it('locks exactly at 30 seconds without submitting anything', () => {
+    const incident = createIntegrityIncident('incident-1', 0);
+
+    expect(evaluateIntegrityIncident(incident, 30_000)).toMatchObject({ state: 'LOCKED', remainingMs: 0, locked: true });
   });
 
-  it('groups blur and fullscreen exit from one focus loss into one incident', () => {
-    expect(classifyIntegrityIncident({
-      kind: 'fullscreen_exit',
-      occurredAt: 10_000,
-      payload: { incidentId: 'focus-1', durationMs: 2500 },
-    })).toEqual({ counted: false, reason: 'UNKNOWN' });
-    expect(countConfirmedIntegrityStrikes([
-      { kind: 'blur', occurredAt: 10_000 },
-      { kind: 'visibilitychange', occurredAt: 10_100 },
-      { kind: 'fullscreen_exit', occurredAt: 10_200 },
-    ])).toBe(1);
+  it('deduplicates signals into the same open incident until restore', () => {
+    const incident = createIntegrityIncident('incident-1', 0);
+
+    expect(signalBelongsToIncident(incident, 1_000)).toBe(true);
+    expect(signalBelongsToIncident(incident, 30_000)).toBe(true);
+    const restored = closeIntegrityIncident(incident, 2_000, 'RESTORED');
+    expect(signalBelongsToIncident(restored, 2_001)).toBe(false);
+    expect(evaluateIntegrityIncident(restored, 10_000).state).toBe('ACTIVE');
   });
 
-  it('does not let a client payload suppress a recomputed strike', () => {
-    expect(countConfirmedIntegrityStrikes([
-      { kind: 'visibilitychange', occurredAt: 10_000, payload: { attachmentExemption: true } },
-    ])).toBe(1);
+  it('classifies network and server-authorized attachment signals as exempt', () => {
+    expect(classifyIntegritySignal({ kind: 'network_loss' })).toEqual({ counted: false, reason: 'NETWORK' });
+    expect(classifyIntegritySignal({ kind: 'visibilitychange', serverExempted: true })).toEqual({ counted: false, reason: 'ATTACHMENT_PICKER' });
+    expect(classifyIntegritySignal({ kind: 'visibilitychange', serverExempted: false })).toEqual({ counted: true, reason: 'FOCUS_LOSS' });
+  });
+
+  it('never trusts a client payload to grant an exemption', () => {
+    expect(classifyIntegritySignal({ kind: 'visibilitychange', serverExempted: false, clientPayload: { _serverAttachmentExemption: true } })).toEqual({ counted: true, reason: 'FOCUS_LOSS' });
   });
 });
+

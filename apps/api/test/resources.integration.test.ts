@@ -32,4 +32,25 @@ describe('resource persistence', () => {
     const audit = await controlPool.query<{ action: string }>('SELECT action FROM audit_events WHERE target_id = $1', [resource.id]);
     expect(audit.rows).toEqual([{ action: 'RESOURCE_UPLOADED' }]);
   });
+
+  it('replays an upload by idempotency key and rejects the same key for different content', async () => {
+    const actorRow = await controlPool.query<{ id: string; email: string; display_name: string; school_id: string; class_id: string; subject_id: string }>(`
+      SELECT u.id, u.email::text, u.display_name, sm.school_id, c.id AS class_id, s.id AS subject_id
+      FROM users u JOIN school_memberships sm ON sm.user_id = u.id
+      JOIN classes c ON c.school_id = sm.school_id JOIN subjects s ON s.school_id = sm.school_id
+      WHERE sm.role = 'SCHOOL_OWNER' ORDER BY u.created_at LIMIT 1
+    `);
+    const actor = actorRow.rows[0]!;
+    const repository = new PostgresResourceRepository(apiPool);
+    const input = { objectKey: 'quarantine/10000000-0000-4000-8000-000000000002', originalName: 'idempotent.pdf', mimeType: 'application/pdf', byteSize: 31, sha256: 'b'.repeat(64), classId: actor.class_id, subjectId: actor.subject_id, idempotencyKey: 'resource-db-replay-1' };
+    const auth = { userId: actor.id, email: actor.email, displayName: actor.display_name, role: 'SCHOOL_OWNER' as const, schoolId: actor.school_id };
+    const first = await repository.createQuarantined(auth, input) as { id: string };
+    const replay = await repository.createQuarantined(auth, input) as { id: string };
+    expect(replay.id).toBe(first.id);
+    const count = await controlPool.query<{ total: string }>('SELECT count(*)::text AS total FROM resources WHERE id = $1', [first.id]);
+    expect(count.rows[0]?.total).toBe('1');
+    await expect(repository.createQuarantined(auth, { ...input, originalName: 'different.pdf' })).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+    const audit = await controlPool.query<{ total: string }>("SELECT count(*)::text AS total FROM audit_events WHERE target_id = $1 AND action = 'RESOURCE_UPLOADED'", [first.id]);
+    expect(audit.rows[0]?.total).toBe('1');
+  });
 });

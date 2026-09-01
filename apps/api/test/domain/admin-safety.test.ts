@@ -23,4 +23,12 @@ describe('admin billing and crawler controls', () => {
     expect(() => assertCrawlUrlIsSafe('https://127.0.0.1/private', new Set(['127.0.0.1']))).toThrowError(expect.objectContaining({ code: 'CRAWL_IP_NOT_ALLOWED' }));
     expect(() => assertCrawlUrlIsSafe('https://evil.example/data', new Set(['catalog.example.edu.vn']))).toThrowError(expect.objectContaining({ code: 'CRAWL_HOST_NOT_ALLOWLISTED' }));
   });
+
+  it('rejects every resolved private address in an allowlisted hostname', async () => {
+    const { assertCrawlUrlResolvesToPublic } = await import('../../src/domain/admin/crawler-safety.js');
+    const url = new URL('https://catalog.example.edu.vn/data');
+
+    await expect(assertCrawlUrlResolvesToPublic(url, async () => [{ address: '93.184.216.34', family: 4 }, { address: '169.254.169.254', family: 4 }])).rejects.toMatchObject({ code: 'CRAWL_IP_NOT_ALLOWED' });
+    await expect(assertCrawlUrlResolvesToPublic(url, async () => [{ address: '2001:db8::1', family: 6 }])).resolves.toEqual(url);
+  });
 });

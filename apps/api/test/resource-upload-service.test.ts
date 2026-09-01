@@ -31,4 +31,18 @@ describe('ResourceUploadService', () => {
     await expect(service.upload(actor, { filename: 'tai-lieu.pdf', declaredMimeType: 'application/pdf', bytes: Buffer.from('%PDF-1.7\nNội dung') })).rejects.toThrow('database unavailable');
     expect(deps.storage.deleteQuarantine).toHaveBeenCalledWith(expect.stringMatching(/^quarantine\//));
   });
+
+  it('reuses the same quarantine object key for a retry with the same idempotency key', async () => {
+    const deps = dependencies();
+    const service = new ResourceUploadService(deps);
+    const options = { idempotencyKey: 'resource-upload-20260901-001', classId: 'class-1', subjectId: 'subject-1' };
+    const candidate = { filename: 'tai-lieu.pdf', declaredMimeType: 'application/pdf', bytes: Buffer.from('%PDF-1.7\nNội dung') };
+
+    await service.upload(actor, candidate, options);
+    await service.upload(actor, candidate, options);
+
+    const firstKey = deps.storage.putQuarantine.mock.calls[0]?.[0];
+    const secondKey = deps.storage.putQuarantine.mock.calls[1]?.[0];
+    expect(firstKey).toBe(secondKey);
+  });
 });

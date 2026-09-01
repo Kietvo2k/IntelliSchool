@@ -50,7 +50,7 @@ describe('exam snapshot encryption', () => {
 
     expect(encodedCiphertext).not.toContain('Nội dung bí mật');
     expect(encodedCiphertext).not.toContain('choice');
-    expect(encodedCiphertext).not.toContain('B');
+    expect(encodedCiphertext).not.toContain('question-version-1');
   });
 
   it('fails closed when the key version is missing', () => {
@@ -85,4 +85,3 @@ describe('exam snapshot encryption', () => {
     );
   });
 });
-
