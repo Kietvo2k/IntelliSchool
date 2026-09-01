@@ -65,6 +65,8 @@ services:
       LOCAL_STORAGE_DIR: ""
       MAIL_DIR: /data/mail
       FILE_QUOTA_BYTES: "1073741824"
+      EXAM_SNAPSHOT_KEYRING_FILE: /data/exam-keyring.json
+      EXAM_SNAPSHOT_ACTIVE_KEY_VERSION: test-v1
       SEED_ON_EMPTY: "true"
       TEST_FORCE_SEED: "true"
       DATABASE_BACKEND: local

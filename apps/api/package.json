@@ -13,6 +13,8 @@
         "db:seed": "node --env-file=../../.env --import tsx src/seed-pilot.ts",
         "db:seed:demo": "node --env-file=../../.env --import tsx src/seed-demo-data.ts",
         "db:reset:pilot-exams": "node --env-file=../../.env --import tsx src/reset-pilot-exams.ts",
+        "exam:snapshots:backfill": "node --env-file=../../.env --import tsx src/backfill-exam-snapshots.ts",
+        "exam:snapshots:rotate": "node --env-file=../../.env --import tsx src/backfill-exam-snapshots.ts --rotate",
         "bootstrap:platform-admin": "node --env-file=../../.env --import tsx src/bootstrap-platform-admin.ts",
         "worker:resource-scan": "node --env-file=../../.env --import tsx src/resource-scan-worker.ts",
         "worker:report-export": "node --env-file=../../.env --import tsx src/report-export-worker.ts"

@@ -5,6 +5,14 @@ if id smartpath >/dev/null 2>&1; then
   chown -R smartpath:smartpath /data || true
 fi
 
+if [ "${NODE_ENV:-}" = "test" ] && [ -n "${EXAM_SNAPSHOT_KEYRING_FILE:-}" ]; then
+  node --input-type=module -e "import { access, writeFile } from 'node:fs/promises'; import { randomBytes } from 'node:crypto'; const file = process.env.EXAM_SNAPSHOT_KEYRING_FILE; try { await access(file); } catch { await writeFile(file, JSON.stringify({ [process.env.EXAM_SNAPSHOT_ACTIVE_KEY_VERSION]: randomBytes(32).toString('base64url') }), { mode: 0o600 }); }"
+  if id smartpath >/dev/null 2>&1; then
+    chown smartpath:smartpath "$EXAM_SNAPSHOT_KEYRING_FILE"
+    chmod 600 "$EXAM_SNAPSHOT_KEYRING_FILE"
+  fi
+fi
+
 wait_for_db() {
   i=0
   while [ "$i" -lt 60 ]; do
