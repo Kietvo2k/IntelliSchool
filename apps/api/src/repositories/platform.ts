@@ -244,6 +244,7 @@ export interface ExamIntegrityInput {
   sessionId: string;
   kind: string;
   payload?: Record<string, unknown>;
+  exemptionToken?: string;
 }
 
 export interface ExamAttachmentExemption {
@@ -502,10 +503,13 @@ export interface PlatformRepository {
   startExamSession(actor: AuthContext, input: StartExamSessionInput, idempotencyKey: string): Promise<unknown>;
   getExamSession(actor: AuthContext, sessionId: string): Promise<unknown>;
   saveExamAnswers(actor: AuthContext, input: SaveExamAnswersInput, idempotencyKey: string): Promise<unknown>;
-  heartbeatExamSession(actor: AuthContext, sessionId: string): Promise<unknown>;
-  issueExamAttachmentExemption(actor: AuthContext, sessionId: string): Promise<ExamAttachmentExemption>;
+  heartbeatExamSession(actor: AuthContext, sessionId: string, idempotencyKey: string): Promise<unknown>;
+  issueExamAttachmentExemption(actor: AuthContext, sessionId: string, idempotencyKey: string): Promise<ExamAttachmentExemption>;
   consumeExamAttachmentExemption(actor: AuthContext, sessionId: string, token: string, idempotencyKey: string): Promise<{ authorized: boolean }>;
-  logExamIntegrity(actor: AuthContext, input: ExamIntegrityInput): Promise<unknown>;
+  logExamIntegrity(actor: AuthContext, input: ExamIntegrityInput, idempotencyKey: string): Promise<unknown>;
+  restoreExamIncident(actor: AuthContext, sessionId: string, incidentId: string, idempotencyKey: string): Promise<unknown>;
+  closeExamIncident(actor: AuthContext, sessionId: string, input: { incidentId: string; reason: string }, idempotencyKey: string): Promise<unknown>;
+  unlockExamSession(actor: AuthContext, sessionId: string, reason: string, idempotencyKey: string): Promise<unknown>;
   submitExamSession(actor: AuthContext, sessionId: string, idempotencyKey: string): Promise<unknown>;
   listExamIntegrity(actor: AuthContext, assignmentId: string): Promise<unknown>;
   listClassMessages(actor: AuthContext, input: ListClassMessagesInput): Promise<unknown>;

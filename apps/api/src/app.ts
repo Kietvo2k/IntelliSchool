@@ -254,7 +254,11 @@ const examIntegritySchema = z.object({
   sessionId: z.string().uuid(),
   kind: z.enum(['visibilitychange', 'blur', 'fullscreen_exit', 'network_loss', 'heartbeat_timeout', 'clipboard', 'contextmenu', 'devtools']),
   payload: z.record(z.unknown()).optional(),
+  exemptionToken: z.string().trim().min(32).max(512).optional(),
 });
+const examIncidentRestoreSchema = z.object({ incidentId: z.string().uuid() });
+const examIncidentCloseSchema = z.object({ incidentId: z.string().uuid(), reason: z.string().trim().min(3).max(2000) });
+const examUnlockSchema = z.object({ reason: z.string().trim().min(3).max(2000) });
 const contributionReviewSchema = z.object({ decision: z.enum(['APPROVED', 'REJECTED']), scope: z.enum(['CLASS', 'SCHOOL']).default('SCHOOL'), reason: z.string().trim().max(2000).optional() });
 
 interface ResourceListRepository {
@@ -442,7 +446,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     const sessionId = (request.params as { id: string }).id;
     if (!z.string().uuid().safeParse(sessionId).success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Mã phiên không hợp lệ.'));
     if (!options.authRepository) return reply.code(503).send(errorBody(request, 'AUTH_UNAVAILABLE', 'Dịch vụ tài khoản chưa sẵn sàng.'));
-    await options.authRepository.revokeSessionById(auth.userId, sessionId);
+    await options.authRepository.revokeSessionById(auth.userId, sessionId, idempotencyKey);
     return reply.send({ data: { revoked: true, idempotencyKey } });
   });
 
@@ -454,7 +458,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     if (!idempotencyKey) return;
     const token = request.cookies[sessionCookieName];
     if (!token || !options.authRepository) return reply.code(503).send(errorBody(request, 'AUTH_UNAVAILABLE', 'Dịch vụ tài khoản chưa sẵn sàng.'));
-    await options.authRepository.revokeOtherSessions(auth.userId, token);
+    await options.authRepository.revokeOtherSessions(auth.userId, token, idempotencyKey);
     return reply.send({ data: { revokedOthers: true, idempotencyKey } });
   });
 
@@ -637,7 +641,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     if (!options.schoolAdministrationRepository) return reply.code(503).send(errorBody(request, 'SCHOOL_REQUESTS_UNAVAILABLE', 'Dịch vụ mở trường chưa sẵn sàng.'));
     const params = request.params as { id: string };
     if (!z.string().uuid().safeParse(params.id).success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Mã yêu cầu mở trường không hợp lệ.'));
-    const rejected = await options.schoolAdministrationRepository.rejectSchoolRequest(params.id, auth.userId, parsed.data.reason);
+    const rejected = await options.schoolAdministrationRepository.rejectSchoolRequest(params.id, auth.userId, parsed.data.reason, idempotencyKey);
     if (!rejected) return reply.code(409).send(errorBody(request, 'SCHOOL_REQUEST_NOT_PENDING', 'Yêu cầu không tồn tại hoặc đã được xử lý.'));
     return reply.send({ data: rejected });
   });
@@ -1050,31 +1054,80 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   app.post('/api/v1/exams/sessions/:id/heartbeat', async (request, reply) => {
     const auth = await requirePlatformRole(request, reply, ['STUDENT']);
     if (!auth) return;
+    if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
     const id = (request.params as { id: string }).id;
     if (!z.string().uuid().safeParse(id).success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Mã ca thi không hợp lệ.'));
     const repository = requirePlatformRepository(request, reply);
     if (!repository) return;
-    return reply.send({ data: await repository.heartbeatExamSession(auth, id) });
+    return reply.send({ data: await repository.heartbeatExamSession(auth, id, idempotencyKey) });
   });
   app.post('/api/v1/exams/sessions/:id/attachment-exemption', async (request, reply) => {
     const auth = await requirePlatformRole(request, reply, ['STUDENT']);
     if (!auth) return;
     if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
     const id = (request.params as { id: string }).id;
     if (!z.string().uuid().safeParse(id).success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Mã ca thi không hợp lệ.'));
     const repository = requirePlatformRepository(request, reply);
     if (!repository) return;
-    return reply.code(201).send({ data: await repository.issueExamAttachmentExemption(auth, id) });
+    return reply.code(201).send({ data: await repository.issueExamAttachmentExemption(auth, id, idempotencyKey) });
   });
   app.post('/api/v1/exams/integrity', async (request, reply) => {
     const auth = await requirePlatformRole(request, reply, ['STUDENT']);
     if (!auth) return;
     if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
     const parsed = examIntegritySchema.safeParse(request.body);
     if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Nhật ký không hợp lệ.'));
     const repository = requirePlatformRepository(request, reply);
     if (!repository) return;
-    return reply.code(201).send({ data: await repository.logExamIntegrity(auth, parsed.data) });
+    return reply.code(201).send({ data: await repository.logExamIntegrity(auth, parsed.data, idempotencyKey) });
+  });
+  app.post('/api/v1/exams/sessions/:id/integrity/restore', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['STUDENT']);
+    if (!auth) return;
+    if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
+    const sessionId = (request.params as { id: string }).id;
+    if (!z.string().uuid().safeParse(sessionId).success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Mã ca thi không hợp lệ.'));
+    const parsed = examIncidentRestoreSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Incident cần được chỉ định để phục hồi.'));
+    const repository = requirePlatformRepository(request, reply);
+    if (!repository) return;
+    return reply.send({ data: await repository.restoreExamIncident(auth, sessionId, parsed.data.incidentId, idempotencyKey) });
+  });
+  app.post('/api/v1/exams/sessions/:id/integrity/close', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER', 'TEACHER']);
+    if (!auth) return;
+    if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
+    const sessionId = (request.params as { id: string }).id;
+    if (!z.string().uuid().safeParse(sessionId).success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Mã ca thi không hợp lệ.'));
+    const parsed = examIncidentCloseSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Lý do đóng incident không hợp lệ.'));
+    const repository = requirePlatformRepository(request, reply);
+    if (!repository) return;
+    return reply.send({ data: await repository.closeExamIncident(auth, sessionId, parsed.data, idempotencyKey) });
+  });
+  app.post('/api/v1/exams/sessions/:id/unlock', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER', 'TEACHER']);
+    if (!auth) return;
+    if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
+    const sessionId = (request.params as { id: string }).id;
+    if (!z.string().uuid().safeParse(sessionId).success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Mã ca thi không hợp lệ.'));
+    const parsed = examUnlockSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Lý do mở khóa ca thi không hợp lệ.'));
+    const repository = requirePlatformRepository(request, reply);
+    if (!repository) return;
+    return reply.send({ data: await repository.unlockExamSession(auth, sessionId, parsed.data.reason, idempotencyKey) });
   });
   app.post('/api/v1/exams/sessions/:id/submit', studentIdMutation((repo, auth, id, key) => repo.submitExamSession(auth, id, key), 'Mã ca thi không hợp lệ.'));
   app.post('/api/v1/exams/sessions/:id/attachments', async (request, reply) => {

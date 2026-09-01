@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import type pg from 'pg';
 import { withTenantTransaction } from '../db.js';
-import { forbidden, notFound } from '../errors.js';
+import { conflict, forbidden, notFound } from '../errors.js';
 import type { AuthContext } from '../types.js';
 import type { QuarantinedResourceInput } from '../services/resource-upload-service.js';
 
@@ -16,6 +17,7 @@ export class PostgresResourceRepository {
     const schoolId = schoolFor(actor);
     if (actor.role !== 'SCHOOL_OWNER' && actor.role !== 'TEACHER' && actor.role !== 'STUDENT') throw forbidden('Bạn không có quyền tải tài nguyên lên.');
     return withTenantTransaction(this.apiPool, { schoolId, userId: actor.userId }, async (client) => {
+      const work = async () => {
       let classId = input.classId ?? null;
       let subjectId = input.subjectId ?? null;
       if (actor.role === 'STUDENT') {
@@ -56,6 +58,10 @@ export class PostgresResourceRepository {
       await client.query('INSERT INTO resource_scan_jobs (school_id, resource_id) VALUES ($1, $2)', [schoolId, resource.id]);
       await client.query(`INSERT INTO audit_events (school_id, actor_id, action, target_type, target_id, metadata) VALUES ($1, $2, 'RESOURCE_UPLOADED', 'resource', $3, $4::jsonb)`, [schoolId, actor.userId, resource.id, JSON.stringify({ mimeType: resource.mime_type, byteSize: Number(resource.byte_size), sha256: resource.sha256 })]);
       return { id: resource.id, originalName: resource.original_name, mimeType: resource.mime_type, byteSize: Number(resource.byte_size), sha256: resource.sha256, status: resource.status, visibility: input.visibility ?? 'CLASS', createdAt: resource.created_at.toISOString() };
+      };
+      return input.idempotencyKey
+        ? this.idempotent(client, schoolId, actor.userId, 'RESOURCE_UPLOAD', input.idempotencyKey, input, work)
+        : work();
     });
   }
 
@@ -104,7 +110,7 @@ export class PostgresResourceRepository {
 
   async requestContribution(actor: AuthContext, resourceId: string, idempotencyKey: string): Promise<unknown> {
     const schoolId = schoolFor(actor);
-    return withTenantTransaction(this.apiPool, { schoolId, userId: actor.userId }, async (client) => {
+    return withTenantTransaction(this.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, 'RESOURCE_CONTRIBUTION_REQUEST', idempotencyKey, { resourceId }, async () => {
       const found = await client.query<{ id: string; status: string; owner_user_id: string | null; visibility: string; contribution_status: string }>(
         'SELECT id, status, owner_user_id, visibility, contribution_status FROM resources WHERE id = $1 AND school_id = $2 FOR UPDATE',
         [resourceId, schoolId],
@@ -116,20 +122,20 @@ export class PostgresResourceRepository {
       await client.query("UPDATE resources SET contribution_status = 'PENDING' WHERE id = $1", [resourceId]);
       await client.query('INSERT INTO audit_events (school_id, actor_id, action, target_type, target_id, metadata) VALUES ($1, $2, $3, $4, $5, $6::jsonb)', [schoolId, actor.userId, 'RESOURCE_CONTRIBUTION_REQUESTED', 'resource', resourceId, JSON.stringify({ idempotencyKey })]);
       return { id: resourceId, contributionStatus: 'PENDING' };
-    });
+    }));
   }
 
   async reviewContribution(actor: AuthContext, resourceId: string, input: { decision: 'APPROVED' | 'REJECTED'; scope: 'CLASS' | 'SCHOOL'; reason?: string }, idempotencyKey: string): Promise<unknown> {
     const schoolId = schoolFor(actor);
     if (actor.role !== 'SCHOOL_OWNER' && actor.role !== 'TEACHER') throw forbidden('Chỉ nhà trường được duyệt tài liệu đóng góp.');
-    return withTenantTransaction(this.apiPool, { schoolId, userId: actor.userId }, async (client) => {
+    return withTenantTransaction(this.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, 'RESOURCE_CONTRIBUTION_REVIEW', idempotencyKey, { resourceId, ...input }, async () => {
       const found = await client.query<{ id: string; contribution_status: string }>('SELECT id, contribution_status FROM resources WHERE id = $1 AND school_id = $2 FOR UPDATE', [resourceId, schoolId]);
       if (!found.rows[0]) throw notFound('Không tìm thấy tài liệu.');
       const status = input.decision === 'APPROVED' ? 'APPROVED' : 'REJECTED';
       await client.query('UPDATE resources SET contribution_status = $2, visibility = CASE WHEN $2 = \'APPROVED\' THEN $3 ELSE visibility END, reviewed_by = $4, reviewed_at = now() WHERE id = $1', [resourceId, status, input.scope, actor.userId]);
       await client.query('INSERT INTO audit_events (school_id, actor_id, action, target_type, target_id, metadata) VALUES ($1, $2, $3, $4, $5, $6::jsonb)', [schoolId, actor.userId, 'RESOURCE_CONTRIBUTION_REVIEWED', 'resource', resourceId, JSON.stringify({ decision: input.decision, scope: input.scope, reason: input.reason, idempotencyKey })]);
       return { id: resourceId, contributionStatus: status, visibility: input.decision === 'APPROVED' ? input.scope : undefined };
-    });
+    }));
   }
 
   async list(actor: AuthContext, input: { page: number; pageSize: number; classId?: string; subjectId?: string; status?: 'QUARANTINED' | 'PROCESSING' | 'READY' | 'REJECTED' }): Promise<unknown> {
@@ -175,6 +181,23 @@ export class PostgresResourceRepository {
         page: input.page, pageSize: input.pageSize, totalItems, totalPages,
       };
     });
+  }
+
+  private async idempotent<T>(client: pg.PoolClient, schoolId: string, actorId: string, operation: string, idempotencyKey: string, request: unknown, work: () => Promise<T>): Promise<T> {
+    const requestHash = createHash('sha256').update(JSON.stringify(request)).digest('hex');
+    const existing = await client.query<{ request_hash: string; response: T | null }>(`
+      SELECT request_hash, response FROM idempotency_records
+      WHERE actor_id = $1 AND operation = $2 AND idempotency_key = $3 FOR UPDATE
+    `, [actorId, operation, idempotencyKey]);
+    if (existing.rows[0]) {
+      if (existing.rows[0].request_hash !== requestHash) throw conflict('IDEMPOTENCY_KEY_REUSED', 'X-Idempotency-Key đã được dùng cho một nội dung khác.');
+      if (existing.rows[0].response === null) throw conflict('IDEMPOTENCY_IN_PROGRESS', 'Yêu cầu trước đó đang được xử lý.');
+      return existing.rows[0].response;
+    }
+    await client.query('INSERT INTO idempotency_records (school_id, actor_id, operation, idempotency_key, request_hash) VALUES ($1, $2, $3, $4, $5)', [schoolId, actorId, operation, idempotencyKey, requestHash]);
+    const response = await work();
+    await client.query('UPDATE idempotency_records SET response = $4::jsonb, completed_at = now() WHERE actor_id = $1 AND operation = $2 AND idempotency_key = $3', [actorId, operation, idempotencyKey, JSON.stringify(response)]);
+    return response;
   }
 
   async close(): Promise<void> { await this.apiPool.end(); }

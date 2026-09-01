@@ -12,6 +12,7 @@ import { createResourceStorage } from './services/storage-factory.js';
 import { startInlineWorkers } from './services/inline-workers.js';
 import { LocalResourceStorage } from './services/local-resource-storage.js';
 import fastifyStatic from '@fastify/static';
+import { loadExamSnapshotKeyring } from './security/exam-snapshot.js';
 
 const port = Number(process.env.PORT ?? 3002);
 const host = process.env.HOST ?? '127.0.0.1';
@@ -31,12 +32,18 @@ const authRepository = new PostgresAuthRepository(createPool(controlDatabaseUrl)
 const schoolAdministrationRepository = new PostgresSchoolAdministrationRepository({
   publicPool: createPool(publicDatabaseUrl), controlPool: createPool(controlDatabaseUrl), mailer,
 });
+const examSnapshotKeyring = await loadExamSnapshotKeyring({
+  filePath: process.env.EXAM_SNAPSHOT_KEYRING_FILE ?? '',
+  activeKeyVersion: process.env.EXAM_SNAPSHOT_ACTIVE_KEY_VERSION ?? '',
+});
 const platformRepository = new PostgresPlatformRepository({
   apiPool: createPool(apiDatabaseUrl),
   controlPool: createPool(controlDatabaseUrl),
   mailer,
+  examSnapshotKeyring,
   crawlAllowlist: new Set((process.env.PLATFORM_CRAWL_ALLOWLIST ?? '').split(',').map((hostName) => hostName.trim().toLowerCase()).filter(Boolean)),
 });
+await platformRepository.backfillExamSnapshots();
 void platformRepository.recoverPendingAiJobs().catch(() => undefined);
 const aiRecoveryTimer = setInterval(() => { void platformRepository.recoverPendingAiJobs().catch((error) => console.error(error)); }, 15_000);
 aiRecoveryTimer.unref();

@@ -70,6 +70,10 @@ export class PostgresSchoolAdministrationRepository implements SchoolAdministrat
         INSERT INTO school_requests (id, school_name, principal_name, principal_email, province, status, created_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
       `, [request.id, request.schoolName, request.principalName, request.principalEmail.trim().toLowerCase(), request.province, request.status, request.createdAt]);
+      await client.query(`
+        INSERT INTO audit_events (school_id, actor_id, action, target_type, target_id, metadata)
+        VALUES (NULL, NULL, 'SCHOOL_REQUEST_CREATED', 'school_request', $1, $2::jsonb)
+      `, [request.id, JSON.stringify({ province: request.province })]);
       await client.query('COMMIT');
       return request;
     } catch (error) {
@@ -95,6 +99,10 @@ export class PostgresSchoolAdministrationRepository implements SchoolAdministrat
     `, [input.schoolCode, input.email.trim().toLowerCase(), input.displayName, input.requestedRole]);
     const row = result.rows[0];
     if (!row) throw notFound('Không tìm thấy trường tương ứng với mã trường đã nhập.');
+    await this.options.controlPool.query(`
+      INSERT INTO audit_events (school_id, actor_id, action, target_type, target_id, metadata)
+      VALUES ($1, NULL, 'REGISTRATION_REQUEST_CREATED', 'registration_request', $2, $3::jsonb)
+    `, [row.school_id, row.id, JSON.stringify({ requestedRole: row.requested_role })]);
     return toRegistrationRequest(row);
   }
 
@@ -119,6 +127,7 @@ export class PostgresSchoolAdministrationRepository implements SchoolAdministrat
     const schoolId = assertSchoolActor(actor);
     if (actor.role !== 'SCHOOL_OWNER') throw forbidden('Chỉ hiệu trưởng được duyệt đăng ký.');
     const client = await this.options.controlPool.connect();
+    let activation: { to: string; displayName: string; token: string } | null = null;
     try {
       await client.query('BEGIN');
       const response = await this.idempotent(client, schoolId, actor.userId, 'REGISTRATION_REVIEW', idempotencyKey, { requestId, ...input }, async () => {
@@ -167,11 +176,17 @@ export class PostgresSchoolAdministrationRepository implements SchoolAdministrat
           INSERT INTO audit_events (school_id, actor_id, action, target_type, target_id, metadata)
           VALUES ($1, $2, 'REGISTRATION_APPROVED', 'registration_request', $3, $4::jsonb)
         `, [schoolId, actor.userId, requestId, JSON.stringify({ userId, requestedRole: registration.requested_role, activationTokenPrepared: true })]);
-        if (this.options.mailer) await this.options.mailer.sendActivation({ to: registration.email, displayName: registration.display_name, token: activationToken });
-        return { ...toRegistrationRequest(approved.rows[0]!), activationEmailQueued: Boolean(this.options.mailer) };
+        activation = { to: registration.email, displayName: registration.display_name, token: activationToken };
+        return { ...toRegistrationRequest(approved.rows[0]!), activationEmailQueued: false };
       });
       await client.query('COMMIT');
-      return response;
+      let activationEmailQueued = false;
+      if (activation && this.options.mailer) {
+        try { await this.options.mailer.sendActivation(activation); activationEmailQueued = true; } catch { activationEmailQueued = false; }
+      }
+      const result = activation ? { ...response, activationEmailQueued } : response;
+      if (activation) await this.options.controlPool.query(`UPDATE idempotency_records SET response = $4::jsonb WHERE actor_id = $1 AND operation = $2 AND idempotency_key = $3`, [actor.userId, 'REGISTRATION_REVIEW', idempotencyKey, JSON.stringify(result)]).catch(() => undefined);
+      return result;
     } catch (error) {
       await client.query('ROLLBACK');
       if ((error as { code?: string }).code === '23505') throw conflict('EMAIL_ALREADY_EXISTS', 'Email này đã được dùng cho một tài khoản khác.');
@@ -248,28 +263,31 @@ export class PostgresSchoolAdministrationRepository implements SchoolAdministrat
     } finally { client.release(); }
   }
 
-  async rejectSchoolRequest(requestId: string, reviewedBy: string, reason: string): Promise<SchoolRequest | null> {
+  async rejectSchoolRequest(requestId: string, reviewedBy: string, reason: string, idempotencyKey: string): Promise<SchoolRequest | null> {
     const client = await this.options.controlPool.connect();
     try {
       await client.query('BEGIN');
-      const existing = await client.query<SchoolRequestRow>(`
-        SELECT id, school_name, principal_name, principal_email::text, province, status, created_at, reviewed_at, reviewed_by, review_reason
-        FROM school_requests WHERE id = $1 FOR UPDATE
-      `, [requestId]);
-      const request = existing.rows[0];
-      if (!request || request.status === 'APPROVED') { await client.query('ROLLBACK'); return null; }
-      if (request.status === 'REJECTED') { await client.query('COMMIT'); return toSchoolRequest(request); }
-      const rejected = await client.query<SchoolRequestRow>(`
-        UPDATE school_requests SET status = 'REJECTED', reviewed_by = $2, reviewed_at = now(), review_reason = $3
-        WHERE id = $1
-        RETURNING id, school_name, principal_name, principal_email::text, province, status, created_at, reviewed_at, reviewed_by, review_reason
-      `, [requestId, reviewedBy, reason]);
-      await client.query(`
-        INSERT INTO audit_events (school_id, actor_id, action, target_type, target_id, metadata)
-        VALUES (NULL, $1, 'SCHOOL_REQUEST_REJECTED', 'school_request', $2, $3::jsonb)
-      `, [reviewedBy, requestId, JSON.stringify({ reason })]);
+      const response = await this.idempotent(client, null, reviewedBy, 'SCHOOL_REQUEST_REJECT', idempotencyKey, { requestId, reason }, async () => {
+        const existing = await client.query<SchoolRequestRow>(`
+          SELECT id, school_name, principal_name, principal_email::text, province, status, created_at, reviewed_at, reviewed_by, review_reason
+          FROM school_requests WHERE id = $1 FOR UPDATE
+        `, [requestId]);
+        const request = existing.rows[0];
+        if (!request || request.status === 'APPROVED') throw conflict('SCHOOL_REQUEST_NOT_PENDING', 'Yêu cầu không tồn tại hoặc đã được xử lý.');
+        if (request.status === 'REJECTED') return toSchoolRequest(request);
+        const rejected = await client.query<SchoolRequestRow>(`
+          UPDATE school_requests SET status = 'REJECTED', reviewed_by = $2, reviewed_at = now(), review_reason = $3
+          WHERE id = $1
+          RETURNING id, school_name, principal_name, principal_email::text, province, status, created_at, reviewed_at, reviewed_by, review_reason
+        `, [requestId, reviewedBy, reason]);
+        await client.query(`
+          INSERT INTO audit_events (school_id, actor_id, action, target_type, target_id, metadata)
+          VALUES (NULL, $1, 'SCHOOL_REQUEST_REJECTED', 'school_request', $2, $3::jsonb)
+        `, [reviewedBy, requestId, JSON.stringify({ reason })]);
+        return toSchoolRequest(rejected.rows[0]!);
+      });
       await client.query('COMMIT');
-      return toSchoolRequest(rejected.rows[0]!);
+      return response;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -377,8 +395,11 @@ export class PostgresSchoolAdministrationRepository implements SchoolAdministrat
         INSERT INTO invitations (school_id, user_id, role, token_hash, expires_at, created_by)
         VALUES ($1, $2, 'TEACHER', $3, now() + interval '30 minutes', $4)
       `, [schoolId, teacherId, hashToken(invitationToken), actor.userId]);
-      if (this.options.mailer) await this.options.mailer.sendActivation({ to: input.email, displayName: input.displayName, token: invitationToken });
-      const response = { id: teacherId, displayName: input.displayName, email: input.email, activationEmailQueued: Boolean(this.options.mailer) };
+      let activationEmailQueued = false;
+      if (this.options.mailer) {
+        try { await this.options.mailer.sendActivation({ to: input.email, displayName: input.displayName, token: invitationToken }); activationEmailQueued = true; } catch { activationEmailQueued = false; }
+      }
+      const response = { id: teacherId, displayName: input.displayName, email: input.email, activationEmailQueued };
       await client.query(`
         INSERT INTO audit_events (school_id, actor_id, action, target_type, target_id, metadata) VALUES ($1, $2, 'TEACHER_INVITED', 'user', $3, '{}'::jsonb)
       `, [schoolId, actor.userId, teacherId]);

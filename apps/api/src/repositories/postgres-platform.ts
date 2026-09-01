@@ -5,7 +5,7 @@ import { createSessionToken, hashToken } from '../security/tokens.js';
 import type { AccountMailer } from '../services/mailer.js';
 import { AppError, badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.js';
 import { calculateMonthlyCharge } from '../domain/admin/billing.js';
-import { assertCrawlUrlIsSafe, fetchAllowlistedExcerpt } from '../domain/admin/crawler-safety.js';
+import { assertCrawlUrlIsSafe, assertCrawlUrlResolvesToPublic, fetchAllowlistedExcerpt } from '../domain/admin/crawler-safety.js';
 import { computeAcademicScores, rankCareerMatches, scoreExtracurricularText, scoreRiasecAnswers, type RiasecResult } from '../domain/career/scoring.js';
 import { CAREER_PROFILES } from '../domain/career/career-profiles.js';
 import { RIASEC_QUESTIONS } from '../domain/career/riasec-questions.js';
@@ -13,7 +13,7 @@ import { EXTRACURRICULAR_QUESTIONS } from '../domain/career/extracurricular.js';
 import { buildInterviewContext, INTERVIEW_SYSTEM_PROMPT, presentInterviewTurn } from '../domain/career/interview.js';
 import { seedFromUuid, shuffleWithSeed } from '../domain/career/exam-shuffle.js';
 import { analyzeCareerWithAgents, CAREER_AGENT_CATALOG, CAREER_AGENT_TYPES } from '../services/ai/career-orchestrator.js';
-import { classifyIntegrityIncident, countConfirmedIntegrityStrikes, integrityStatus, shouldLockExam } from '../domain/exam/integrity.js';
+import { classifyIntegritySignal, createIntegrityIncident, evaluateIntegrityIncident, signalBelongsToIncident, type IntegrityIncident, type IntegrityState } from '../domain/exam/integrity.js';
 import { EXAM_PERIOD_LABELS, normalizeExamPeriod } from '../domain/exam/period.js';
 import { buildLearnerKbText, classroomGradesFromEntries, draftSkillsFromGrades, mergeClassroomGrades, snapshotNumberRecord } from '../domain/ai/learner-kb.js';
 import { hashPassword, verifyPassword } from '../security/passwords.js';
@@ -35,6 +35,7 @@ import { chatWithFallback, providerFromModel } from '../services/ai/providers.js
 import { chunkText, extractLessonText, localEmbed, rankChunks, EMBEDDING_DIM } from '../domain/ai/rag.js';
 import { guardUserPrompt, looksLikeAnswerFishing } from '../domain/ai/guard.js';
 import { estimateCostVnd, approximateTokens, checkBudget } from '../domain/ai/cost.js';
+import { decryptExamSnapshot, encryptExamSnapshot, type ExamSnapshotKeyring, type ExamSnapshotMetadata, type ExamSnapshotPlaintext } from '../security/exam-snapshot.js';
 import {
   ANSWER_FISHING_RESPONSE,
   buildSystemPrompt,
@@ -118,6 +119,7 @@ interface RepositoryOptions {
   controlPool: pg.Pool;
   crawlAllowlist?: ReadonlySet<string>;
   mailer?: AccountMailer;
+  examSnapshotKeyring?: ExamSnapshotKeyring;
 }
 
 interface AssignmentItemRow {
@@ -195,7 +197,10 @@ function lessonApiContent(content: unknown, columnVideo?: unknown): Record<strin
 
 export class PostgresPlatformRepository implements PlatformRepository {
   private readonly activeAiJobs = new Set<string>();
-  constructor(private readonly options: RepositoryOptions) {}
+  private examSnapshotKeyring?: ExamSnapshotKeyring;
+  constructor(private readonly options: RepositoryOptions) {
+    this.examSnapshotKeyring = options.examSnapshotKeyring;
+  }
 
   async close(): Promise<void> {
     await Promise.all([this.options.apiPool.end(), this.options.controlPool.end()]);
@@ -1226,6 +1231,7 @@ export class PostgresPlatformRepository implements PlatformRepository {
     const sourceRows = await this.options.controlPool.query<{ host: string }>('SELECT host FROM crawl_sources WHERE is_enabled = true');
     const allowedHosts = new Set([...configuredHosts, ...sourceRows.rows.map((row) => row.host)]);
     const url = assertCrawlUrlIsSafe(rawUrl, allowedHosts);
+    await assertCrawlUrlResolvesToPublic(url);
     const client = await this.options.controlPool.connect();
     let committed = false;
     try {
@@ -1590,8 +1596,8 @@ export class PostgresPlatformRepository implements PlatformRepository {
   async publishAssignment(actor: AuthContext, input: PublishAssignmentInput, idempotencyKey: string): Promise<unknown> {
     const schoolId = assertSchoolActor(actor);
     return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, 'ASSIGNMENT_PUBLISH', idempotencyKey, input, async () => {
-      const assignmentResult = await client.query<{ class_id: string; subject_id: string; status: string }>(`
-        SELECT class_id, subject_id, status FROM assignments WHERE id = $1
+      const assignmentResult = await client.query<{ class_id: string; subject_id: string; status: string; delivery_mode: string }>(`
+        SELECT class_id, subject_id, status, delivery_mode FROM assignments WHERE id = $1
       `, [input.assignmentId]);
       const assignment = assignmentResult.rows[0];
       if (!assignment) throw notFound('Không tìm thấy bài tập.');
@@ -1601,7 +1607,15 @@ export class PostgresPlatformRepository implements PlatformRepository {
       if (numeric(counted.rows[0]?.count) < MIN_PUBLISHED_ASSIGNMENT_ITEMS) {
         throw unprocessable(`Xuất bản cần tối thiểu ${MIN_PUBLISHED_ASSIGNMENT_ITEMS} câu (mọi loại cộng lại).`, 'ASSIGNMENT_TOO_SHORT');
       }
-      await client.query(`UPDATE assignments SET status = 'PUBLISHED', published_at = now() WHERE id = $1`, [input.assignmentId]);
+      const snapshot = assignment.delivery_mode === 'EXAM'
+        ? await this.createExamSnapshot(client, { schoolId, assignmentId: input.assignmentId, assignmentVersion: 1, encryptionRevision: 1, createdBy: actor.userId })
+        : null;
+      if (snapshot) {
+        await client.query(`UPDATE assignments SET status = 'PUBLISHED', published_at = now(), active_exam_snapshot_id = $2 WHERE id = $1`, [input.assignmentId, snapshot.id]);
+        await this.audit(client, schoolId, actor.userId, 'EXAM_SNAPSHOT_CREATED', 'exam_snapshot', snapshot.id, { assignmentId: input.assignmentId, metadataHash: snapshot.metadataHash });
+      } else {
+        await client.query(`UPDATE assignments SET status = 'PUBLISHED', published_at = now() WHERE id = $1`, [input.assignmentId]);
+      }
       await this.audit(client, schoolId, actor.userId, 'ASSIGNMENT_PUBLISHED', 'assignment', input.assignmentId, {});
       return { id: input.assignmentId, status: 'PUBLISHED' };
     }));
@@ -1872,16 +1886,20 @@ export class PostgresPlatformRepository implements PlatformRepository {
       } else {
         await this.assertTeacherCanManage(client, actor, assignment.class_id, assignment.subject_id);
       }
-      const items = await client.query<{ id: string; question_version_id: string; position: number; points: string; type: QuestionType; prompt: unknown; rubric: unknown }>(`
+      const examSnapshot = actor.role === 'STUDENT' && assignment.delivery_mode === 'EXAM' ? await this.snapshotForAssignment(client, assignmentId) : null;
+      const items = examSnapshot ? null : await client.query<{ id: string; question_version_id: string; position: number; points: string; type: QuestionType; prompt: unknown; rubric: unknown }>(`
         SELECT ai.id, ai.question_version_id, ai.position, ai.points, qv.type, qv.prompt, qv.rubric
         FROM assignment_items ai JOIN question_versions qv ON qv.id = ai.question_version_id
         WHERE ai.assignment_id = $1 ORDER BY ai.position
       `, [assignmentId]);
+      const itemViews = examSnapshot
+        ? examSnapshot.items.map((item) => ({ id: item.assignmentItemId, questionVersionId: item.questionVersionId, position: item.position, points: item.points, type: item.type, prompt: item.prompt, rubric: {} }))
+        : items!.rows.map((item) => ({ id: item.id, questionVersionId: item.question_version_id, position: item.position, points: numeric(item.points), type: item.type, prompt: jsonRecord(item.prompt), rubric: actor.role === 'STUDENT' ? {} : (item.type === 'ESSAY' ? jsonRecord(item.rubric) : {}) }));
       return {
         id: assignment.id, classId: assignment.class_id, subjectId: assignment.subject_id, title: assignment.title,
         instructions: assignment.instructions, status: assignment.status, dueAt: assignment.due_at?.toISOString() ?? null, maxAttempts: assignment.max_attempts, gradingPolicy: assignment.grading_policy,
         deliveryMode: assignment.delivery_mode, examPeriod: normalizeExamPeriod(assignment.exam_period), examPeriodLabel: EXAM_PERIOD_LABELS[normalizeExamPeriod(assignment.exam_period)], durationMinutes: assignment.duration_minutes, showScoreOnSubmit: assignment.show_score_on_submit,
-        items: items.rows.map((item) => ({ id: item.id, questionVersionId: item.question_version_id, position: item.position, points: numeric(item.points), type: item.type, prompt: jsonRecord(item.prompt), rubric: item.type === 'ESSAY' ? jsonRecord(item.rubric) : {} })),
+        items: itemViews,
       };
     });
   }
@@ -1910,7 +1928,7 @@ export class PostgresPlatformRepository implements PlatformRepository {
   async requestReportExport(actor: AuthContext, input: import('./platform.js').RequestReportExportInput, idempotencyKey: string): Promise<unknown> {
     const schoolId = assertSchoolActor(actor);
     if (actor.role !== 'SCHOOL_OWNER' && actor.role !== 'TEACHER') throw forbidden('Bạn không có quyền tạo export báo cáo.');
-    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => {
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, 'REPORT_EXPORT_CREATE', idempotencyKey, input, async () => {
       if (input.subjectId) await this.assertTeacherCanManage(client, actor, input.classId, input.subjectId);
       else if (actor.role === 'TEACHER') {
         const allowed = await client.query<{ allowed: boolean }>('SELECT EXISTS (SELECT 1 FROM class_teacher_assignments WHERE class_id = $1 AND teacher_id = $2) AS allowed', [input.classId, actor.userId]);
@@ -1925,7 +1943,7 @@ export class PostgresPlatformRepository implements PlatformRepository {
       const row = created.rows[0]!;
       await this.audit(client, schoolId, actor.userId, 'REPORT_EXPORT_QUEUED', 'report_export', row.id, { kind: row.kind, format: row.format });
       return { id: row.id, kind: row.kind, format: row.format, status: row.status, expiresAt: row.expires_at.toISOString(), createdAt: row.created_at.toISOString() };
-    });
+    }));
   }
 
   async listReportExports(actor: AuthContext): Promise<unknown> {
@@ -3828,34 +3846,38 @@ export class PostgresPlatformRepository implements PlatformRepository {
       if (!student || student.student_code.trim().toUpperCase() !== input.studentCode.trim().toUpperCase()) {
         throw forbidden('Mã học sinh không khớp với tài khoản đang đăng nhập.');
       }
-      const assignment = await client.query<{ id: string; title: string; duration_minutes: number | null; exam_pin_hash: string | null; class_id: string; subject_id: string; status: string; delivery_mode: string }>(`
-        SELECT a.id, a.title, a.duration_minutes, a.exam_pin_hash, a.class_id, a.subject_id, a.status, a.delivery_mode
+      const assignment = await client.query<{ id: string; title: string; duration_minutes: number | null; exam_pin_hash: string | null; class_id: string; subject_id: string; status: string; delivery_mode: string; active_exam_snapshot_id: string | null }>(`
+        SELECT a.id, a.title, a.duration_minutes, a.exam_pin_hash, a.class_id, a.subject_id, a.status, a.delivery_mode, a.active_exam_snapshot_id
         FROM assignments a JOIN class_enrollments ce ON ce.class_id = a.class_id AND ce.student_id = $2 AND ce.status = 'ACTIVE'
         WHERE a.id = $1 LIMIT 1 FOR UPDATE OF a
       `, [input.assignmentId, actor.userId]);
       const exam = assignment.rows[0];
       if (!exam || exam.status !== 'PUBLISHED' || exam.delivery_mode !== 'EXAM') throw notFound('Không tìm thấy ca thi thử đang mở.');
       if (!exam.exam_pin_hash || !(await verifyPassword(input.pin, exam.exam_pin_hash))) throw forbidden('Mã PIN đợt thi không đúng.');
-      const existing = await client.query<{ id: string; submitted_at: Date | null; ends_at: Date; attempt_id: string | null; shuffle_seed: unknown }>(
-        'SELECT id, submitted_at, ends_at, attempt_id, shuffle_seed FROM exam_sessions WHERE assignment_id = $1 AND student_id = $2',
+      if (!exam.active_exam_snapshot_id) throw new AppError(503, 'EXAM_SNAPSHOT_UNAVAILABLE', 'Nội dung kỳ thi hiện không khả dụng.');
+      const snapshot = await this.snapshotForAssignment(client, input.assignmentId);
+      const existing = await client.query<{ id: string; submitted_at: Date | null; ends_at: Date; attempt_id: string | null; shuffle_seed: unknown; exam_snapshot_id: string | null }>(
+        'SELECT id, submitted_at, ends_at, attempt_id, shuffle_seed, exam_snapshot_id FROM exam_sessions WHERE assignment_id = $1 AND student_id = $2',
         [input.assignmentId, actor.userId],
       );
       if (existing.rows[0]?.submitted_at) throw conflict('EXAM_ALREADY_SUBMITTED', 'Em đã nộp ca thi này.');
-      if (existing.rows[0]) return { sessionId: existing.rows[0].id, attemptId: existing.rows[0].attempt_id, endsAt: existing.rows[0].ends_at.toISOString(), resumed: true };
+      if (existing.rows[0]) {
+        if (!existing.rows[0].exam_snapshot_id) await client.query('UPDATE exam_sessions SET exam_snapshot_id = $2 WHERE id = $1', [existing.rows[0].id, exam.active_exam_snapshot_id]);
+        return { sessionId: existing.rows[0].id, attemptId: existing.rows[0].attempt_id, endsAt: existing.rows[0].ends_at.toISOString(), resumed: true, snapshotVersion: snapshot.assignmentVersion };
+      }
       const duration = exam.duration_minutes ?? 45;
       const attempt = await client.query<{ id: string }>(`
         INSERT INTO assignment_attempts (school_id, assignment_id, student_id, status, attempt_number, idempotency_key)
         VALUES ($1, $2, $3, 'IN_PROGRESS', 1, $4) RETURNING id
       `, [schoolId, input.assignmentId, actor.userId, idempotencyKey]);
-      const items = await client.query<{ id: string }>('SELECT id FROM assignment_items WHERE assignment_id = $1 ORDER BY position', [input.assignmentId]);
       const seed = seedFromUuid(attempt.rows[0]!.id);
-      const itemOrder = shuffleWithSeed(items.rows.map((row) => row.id), seed);
+      const itemOrder = shuffleWithSeed(snapshot.items.map((row) => row.assignmentItemId), seed);
       const session = await client.query<{ id: string; ends_at: Date }>(`
-        INSERT INTO exam_sessions (school_id, assignment_id, student_id, attempt_id, shuffle_seed, ends_at)
-        VALUES ($1, $2, $3, $4, $5::jsonb, now() + make_interval(mins => $6)) RETURNING id, ends_at
-      `, [schoolId, input.assignmentId, actor.userId, attempt.rows[0]!.id, JSON.stringify({ itemOrder, seed }), duration]);
+        INSERT INTO exam_sessions (school_id, assignment_id, student_id, attempt_id, exam_snapshot_id, shuffle_seed, ends_at)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, now() + make_interval(mins => $7)) RETURNING id, ends_at
+      `, [schoolId, input.assignmentId, actor.userId, attempt.rows[0]!.id, exam.active_exam_snapshot_id, JSON.stringify({ itemOrder, seed }), duration]);
       await this.audit(client, schoolId, actor.userId, 'EXAM_SESSION_STARTED', 'exam_session', session.rows[0]!.id, { assignmentId: input.assignmentId });
-      return { sessionId: session.rows[0]!.id, attemptId: attempt.rows[0]!.id, endsAt: session.rows[0]!.ends_at.toISOString(), resumed: false, councilName: student.school_name, displayName: student.display_name, studentCode: student.student_code };
+      return { sessionId: session.rows[0]!.id, attemptId: attempt.rows[0]!.id, endsAt: session.rows[0]!.ends_at.toISOString(), resumed: false, snapshotVersion: snapshot.assignmentVersion, councilName: student.school_name, displayName: student.display_name, studentCode: student.student_code };
     }));
   }
 
@@ -3867,14 +3889,10 @@ export class PostgresPlatformRepository implements PlatformRepository {
         'SELECT a.title, a.instructions, a.show_score_on_submit, sub.name AS subject_name, a.camera_required, a.integrity_mode FROM assignments a JOIN subjects sub ON sub.id = a.subject_id WHERE a.id = $1',
         [session.assignment_id],
       );
-      const items = await client.query<{ id: string; position: number; points: string; type: QuestionType; prompt: unknown }>(`
-        SELECT ai.id, ai.position, ai.points, qv.type, qv.prompt
-        FROM assignment_items ai JOIN question_versions qv ON qv.id = ai.question_version_id
-        WHERE ai.assignment_id = $1
-      `, [session.assignment_id]);
+      const snapshot = await this.snapshotForSession(client, session.id, session.assignment_id);
       const seed = jsonRecord(session.shuffle_seed);
-      const order = Array.isArray(seed.itemOrder) ? seed.itemOrder as string[] : items.rows.map((row) => row.id);
-      const byId = new Map(items.rows.map((row) => [row.id, row]));
+      const order = Array.isArray(seed.itemOrder) ? seed.itemOrder as string[] : snapshot.items.map((row) => row.assignmentItemId);
+      const byId = new Map(snapshot.items.map((row) => [row.assignmentItemId, row]));
       const answers = await client.query<{ assignment_item_id: string; answer: unknown }>(
         'SELECT assignment_item_id, answer FROM submission_answers WHERE attempt_id = $1',
         [session.attempt_id],
@@ -3886,11 +3904,11 @@ export class PostgresPlatformRepository implements PlatformRepository {
         const prompt = jsonRecord(item.prompt);
         const choices = Array.isArray(prompt.choices) ? shuffleWithSeed(prompt.choices as string[], seedFromUuid(`${session.id}:${id}`)) : undefined;
         return {
-          id: item.id,
+          id: item.assignmentItemId,
           number: index + 1,
           type: item.type,
-          points: numeric(item.points),
-          prompt: {
+        points: item.points,
+        prompt: {
             text: prompt.text,
             stem: prompt.stem,
             passage: prompt.passage,
@@ -3901,9 +3919,10 @@ export class PostgresPlatformRepository implements PlatformRepository {
             imageUrl: typeof prompt.imageUrl === 'string' ? prompt.imageUrl : (typeof prompt.imageSvg === 'string' ? `data:image/svg+xml;utf8,${encodeURIComponent(String(prompt.imageSvg))}` : undefined),
             imageSvg: prompt.imageSvg,
           },
-          answer: answerMap[item.id] ?? {},
+          answer: answerMap[item.assignmentItemId] ?? {},
         };
       }).filter(Boolean);
+      const integrity = await this.integritySnapshot(client, session.id, session.locked_at);
       return {
         sessionId: session.id,
         assignmentId: session.assignment_id,
@@ -3911,14 +3930,15 @@ export class PostgresPlatformRepository implements PlatformRepository {
         subjectName: assignment.rows[0]?.subject_name,
         instructions: assignment.rows[0]?.instructions,
         endsAt: session.ends_at.toISOString(),
-        serverNow: new Date().toISOString(),
+        serverNow: integrity.serverNow,
         submittedAt: session.submitted_at?.toISOString() ?? null,
-        lockedAt: session.locked_at?.toISOString() ?? null,
+        lockedAt: integrity.lockedAt,
         cameraRequired: assignment.rows[0]?.camera_required ?? false,
         integrityMode: assignment.rows[0]?.integrity_mode === 'STRICT_WEB' ? 'STRICT_WEB' : 'PRACTICE',
+        integrity,
         integrityPolicy: {
-          maxIncidents: 3,
-          graceMs: 2_000,
+          graceMs: 5_000,
+          lockMs: 30_000,
           attachmentExemptionSeconds: 60,
           fullscreenRequired: assignment.rows[0]?.integrity_mode === 'STRICT_WEB',
         },
@@ -3930,12 +3950,17 @@ export class PostgresPlatformRepository implements PlatformRepository {
 
   async saveExamAnswers(actor: AuthContext, input: SaveExamAnswersInput, idempotencyKey: string): Promise<unknown> {
     const schoolId = assertSchoolActor(actor);
-    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => {
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, `EXAM_ANSWERS:${input.sessionId}`, idempotencyKey, input, async () => {
       const session = await this.loadExamSession(client, actor, input.sessionId);
       if (session.submitted_at) throw conflict('EXAM_ALREADY_SUBMITTED', 'Ca thi đã nộp.');
-      if (session.locked_at) throw conflict('EXAM_LOCKED', 'Ca thi đã khóa sau 3 lần rời trang.');
-      if (session.ends_at.getTime() < Date.now()) throw conflict('EXAM_TIME_OVER', 'Đã hết giờ làm bài.');
+      const integrity = await this.integritySnapshot(client, session.id, session.locked_at);
+      if (integrity.state === 'LOCKED' || integrity.lockedAt) throw conflict('EXAM_LOCKED', 'Ca thi đã khóa do incident integrity; cần giám thị mở khóa.');
+      const clock = await client.query<{ server_now: Date }>('SELECT now() AS server_now');
+      if (session.ends_at.getTime() < (clock.rows[0]?.server_now ?? new Date()).getTime()) throw conflict('EXAM_TIME_OVER', 'Đã hết giờ làm bài.');
+      const snapshot = await this.snapshotForSession(client, session.id, session.assignment_id);
+      const itemIds = new Set(snapshot.items.map((item) => item.assignmentItemId));
       for (const entry of input.answers) {
+        if (!itemIds.has(entry.assignmentItemId)) throw unprocessable('Câu trả lời không thuộc snapshot ca thi.', 'EXAM_ITEM_NOT_IN_SNAPSHOT');
         await client.query(`
           INSERT INTO submission_answers (school_id, attempt_id, assignment_item_id, answer)
           VALUES ($1, $2, $3, $4::jsonb)
@@ -3943,24 +3968,28 @@ export class PostgresPlatformRepository implements PlatformRepository {
         `, [schoolId, session.attempt_id, entry.assignmentItemId, JSON.stringify(entry.answer)]);
       }
       await client.query('UPDATE exam_sessions SET last_heartbeat_at = now() WHERE id = $1', [session.id]);
+      await this.audit(client, schoolId, actor.userId, 'EXAM_ANSWERS_SAVED', 'exam_session', session.id, { saved: input.answers.length });
       return { sessionId: session.id, saved: input.answers.length, idempotencyKey };
-    });
+    }));
   }
 
-  async heartbeatExamSession(actor: AuthContext, sessionId: string): Promise<unknown> {
+  async heartbeatExamSession(actor: AuthContext, sessionId: string, idempotencyKey: string): Promise<unknown> {
     const schoolId = assertSchoolActor(actor);
-    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => {
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, `EXAM_HEARTBEAT:${sessionId}`, idempotencyKey, { sessionId }, async () => {
       const session = await this.loadExamSession(client, actor, sessionId);
-      if (session.locked_at) throw conflict('EXAM_LOCKED', 'Ca thi đã khóa sau 3 lần rời trang.');
-      await client.query('UPDATE exam_sessions SET last_heartbeat_at = now() WHERE id = $1', [session.id]);
-      return { sessionId: session.id, endsAt: session.ends_at.toISOString(), serverNow: new Date().toISOString(), remainingMs: Math.max(0, session.ends_at.getTime() - Date.now()) };
-    });
+      const clock = await client.query<{ server_now: Date }>('SELECT now() AS server_now');
+      const serverNow = clock.rows[0]?.server_now ?? new Date();
+      await client.query('UPDATE exam_sessions SET last_heartbeat_at = $2 WHERE id = $1', [session.id, serverNow]);
+      const integrity = await this.integritySnapshot(client, session.id, session.locked_at);
+      await this.audit(client, schoolId, actor.userId, 'EXAM_SESSION_HEARTBEAT', 'exam_session', session.id, { state: integrity.state });
+      return { sessionId: session.id, endsAt: session.ends_at.toISOString(), examRemainingMs: Math.max(0, session.ends_at.getTime() - serverNow.getTime()), ...integrity };
+    }));
   }
 
-  async issueExamAttachmentExemption(actor: AuthContext, sessionId: string): Promise<{ sessionId: string; token: string; expiresAt: string }> {
+  async issueExamAttachmentExemption(actor: AuthContext, sessionId: string, idempotencyKey: string): Promise<{ sessionId: string; token: string; expiresAt: string }> {
     const schoolId = assertSchoolActor(actor);
     if (actor.role !== 'STUDENT') throw forbidden('Chỉ học sinh mới được mở hộp chọn tệp trong ca thi.');
-    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => {
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, `EXAM_ATTACHMENT_EXEMPTION:${sessionId}`, idempotencyKey, { sessionId }, async () => {
       const session = await this.loadExamSession(client, actor, sessionId);
       if (session.submitted_at || session.locked_at || session.ends_at.getTime() <= Date.now()) throw conflict('EXAM_NOT_ACTIVE', 'Ca thi không còn nhận tệp đính kèm.');
       const essay = await client.query<{ id: string }>(
@@ -3987,13 +4016,13 @@ export class PostgresPlatformRepository implements PlatformRepository {
       );
       await this.audit(client, schoolId, actor.userId, 'EXAM_ATTACHMENT_EXEMPTION_ISSUED', 'exam_session', session.id, { expiresAt: expiresAt.toISOString() });
       return { sessionId: session.id, token, expiresAt: expiresAt.toISOString() };
-    });
+    }));
   }
 
   async consumeExamAttachmentExemption(actor: AuthContext, sessionId: string, token: string, idempotencyKey: string): Promise<{ authorized: boolean }> {
     const schoolId = assertSchoolActor(actor);
     if (actor.role !== 'STUDENT' || token.trim().length < 32) return { authorized: false };
-    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => {
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, `EXAM_ATTACHMENT_CONSUME:${sessionId}`, idempotencyKey, { sessionId, tokenHash: hashToken(token).toString('hex') }, async () => {
       const session = await this.loadExamSession(client, actor, sessionId);
       if (session.submitted_at || session.locked_at || session.ends_at.getTime() <= Date.now()) return { authorized: false };
       const consumed = await client.query<{ id: string }>(
@@ -4005,50 +4034,152 @@ export class PostgresPlatformRepository implements PlatformRepository {
           RETURNING id`,
         [session.id, actor.userId, hashToken(token), idempotencyKey],
       );
-      return { authorized: Boolean(consumed.rows[0]) };
-    });
+      const authorized = Boolean(consumed.rows[0]);
+      if (authorized) await this.audit(client, schoolId, actor.userId, 'EXAM_ATTACHMENT_EXEMPTION_CONSUMED', 'exam_session', session.id, {});
+      return { authorized };
+    }));
   }
 
-  async logExamIntegrity(actor: AuthContext, input: ExamIntegrityInput): Promise<unknown> {
+  async logExamIntegrity(actor: AuthContext, input: ExamIntegrityInput, idempotencyKey: string): Promise<unknown> {
     const schoolId = assertSchoolActor(actor);
-    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => {
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, `EXAM_INTEGRITY:${input.sessionId}`, idempotencyKey, { ...input, exemptionToken: input.exemptionToken ? hashToken(input.exemptionToken).toString('hex') : null }, async () => {
       const session = await this.loadExamSession(client, actor, input.sessionId);
-      const clientPayload = jsonRecord(input.payload);
-      delete clientPayload._serverAttachmentExemption;
-      const classification = classifyIntegrityIncident({ kind: input.kind, occurredAt: Date.now(), payload: clientPayload });
+      if (session.submitted_at) throw conflict('EXAM_ALREADY_SUBMITTED', 'Ca thi đã nộp.');
+      const clock = await client.query<{ server_now: Date }>('SELECT now() AS server_now');
+      const serverNow = clock.rows[0]?.server_now ?? new Date();
       const policy = await client.query<{ integrity_mode: string }>('SELECT integrity_mode FROM assignments WHERE id = $1', [session.assignment_id]);
       const strictWeb = policy.rows[0]?.integrity_mode === 'STRICT_WEB';
-      const effectiveClassification = strictWeb ? classification : { counted: false, reason: 'UNKNOWN' as const };
-      const previous = await client.query<{ incident_id: string | null; counted: boolean; reason: string | null; occurred_at: Date }>(
-        'SELECT incident_id, counted, reason, occurred_at FROM exam_integrity_events WHERE session_id = $1 ORDER BY occurred_at DESC LIMIT 1',
-        [session.id],
-      );
-      const previousEvent = previous.rows[0];
-      const incidentId = effectiveClassification.counted
-        && previousEvent?.counted
-        && previousEvent.reason === effectiveClassification.reason
-        && previousEvent.incident_id
-        && Date.now() - previousEvent.occurred_at.getTime() < 1_000
-        ? previousEvent.incident_id
-        : effectiveClassification.counted ? randomUUID() : null;
-      await client.query(
-        'INSERT INTO exam_integrity_events (school_id, session_id, kind, payload, incident_id, counted, reason) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)',
-        [schoolId, session.id, input.kind.slice(0, 40), JSON.stringify({ ...clientPayload, counted: effectiveClassification.counted, reason: effectiveClassification.reason, policy: strictWeb ? 'STRICT_WEB' : 'PRACTICE' }), incidentId, effectiveClassification.counted, effectiveClassification.reason],
-      );
-      if (!strictWeb) return { recorded: true, counted: false, reason: 'PRACTICE_MODE', ...integrityStatus(0), locked: false };
-      const history = await client.query<{ kind: string; occurred_at: Date; payload: unknown }>(
-        'SELECT kind, occurred_at, payload FROM exam_integrity_events WHERE session_id = $1 ORDER BY occurred_at ASC',
-        [session.id],
-      );
-      const strikes = countConfirmedIntegrityStrikes(history.rows.map((row) => ({ kind: row.kind, occurredAt: row.occurred_at.getTime(), payload: jsonRecord(row.payload) })));
-      let locked = Boolean(session.locked_at);
-      if (!locked && shouldLockExam(strikes)) {
-        await client.query("UPDATE exam_sessions SET locked_at = now(), lock_reason = 'INTEGRITY_STRIKES' WHERE id = $1 AND locked_at IS NULL", [session.id]);
-        locked = true;
+      let serverExempted = false;
+      if (input.exemptionToken) {
+        const grant = await client.query<{ id: string }>(`
+          SELECT id FROM exam_attachment_exemptions
+          WHERE session_id = $1 AND user_id = $2 AND token_hash = $3 AND expires_at > $4 AND consumed_at IS NULL
+          LIMIT 1
+        `, [session.id, actor.userId, hashToken(input.exemptionToken), serverNow]);
+        serverExempted = Boolean(grant.rows[0]);
       }
-      const status = integrityStatus(strikes);
-      return { recorded: true, counted: effectiveClassification.counted, reason: effectiveClassification.reason, ...status, locked };
-    });
+      const classification = strictWeb ? classifyIntegritySignal({ kind: input.kind, serverExempted, clientPayload: input.payload }) : { counted: false, reason: 'UNKNOWN' as const };
+      const safePayload = jsonRecord(input.payload);
+      delete safePayload._serverAttachmentExemption;
+      const open = await client.query<{ id: string; state: Exclude<IntegrityState, 'ACTIVE'>; started_at: Date; last_signal_at: Date; grace_ends_at: Date; lock_at: Date; locked_at: Date | null; closed_at: Date | null; close_reason: string | null }>(`
+        SELECT id, state, started_at, last_signal_at, grace_ends_at, lock_at, locked_at, closed_at, close_reason
+        FROM exam_integrity_incidents
+        WHERE session_id = $1 AND closed_at IS NULL
+        ORDER BY started_at DESC
+        LIMIT 1
+        FOR UPDATE
+      `, [session.id]);
+      const current = open.rows[0];
+      let incidentId: string | null = current?.id ?? null;
+      let counted = false;
+      if (classification.counted) {
+        const currentModel: IntegrityIncident | null = current ? {
+          incidentId: current.id,
+          startedAt: current.started_at.getTime(),
+          lastSignalAt: current.last_signal_at.getTime(),
+          graceEndsAt: current.grace_ends_at.getTime(),
+          lockAt: current.lock_at.getTime(),
+          state: current.state,
+          closedAt: current.closed_at?.getTime() ?? null,
+          closeReason: current.close_reason,
+        } : null;
+        if (currentModel && signalBelongsToIncident(currentModel, serverNow.getTime())) {
+          incidentId = currentModel.incidentId;
+        } else {
+          const created = createIntegrityIncident(randomUUID(), serverNow.getTime());
+          incidentId = created.incidentId;
+          counted = true;
+          await client.query(`
+            INSERT INTO exam_integrity_incidents (id, school_id, session_id, state, started_at, last_signal_at, grace_ends_at, lock_at)
+            VALUES ($1, $2, $3, $4, $5, $5, $6, $7)
+          `, [created.incidentId, schoolId, session.id, created.state, serverNow, new Date(created.graceEndsAt), new Date(created.lockAt)]);
+        }
+      }
+      await client.query(`
+        INSERT INTO exam_integrity_events (school_id, session_id, kind, payload, incident_id, counted, reason, signal_id, server_now)
+        VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9)
+      `, [schoolId, session.id, input.kind.slice(0, 40), JSON.stringify({ ...safePayload, serverExempted, policy: strictWeb ? 'STRICT_WEB' : 'PRACTICE' }), incidentId, counted, classification.reason, idempotencyKey, serverNow]);
+      if (!strictWeb || !incidentId) return { recorded: true, counted: false, reason: strictWeb ? classification.reason : 'PRACTICE_MODE', ...(await this.integritySnapshot(client, session.id, session.locked_at)) };
+      const row = current ?? (await client.query<{ id: string; state: Exclude<IntegrityState, 'ACTIVE'>; started_at: Date; last_signal_at: Date; grace_ends_at: Date; lock_at: Date; locked_at: Date | null; closed_at: Date | null; close_reason: string | null }>('SELECT id, state, started_at, last_signal_at, grace_ends_at, lock_at, locked_at, closed_at, close_reason FROM exam_integrity_incidents WHERE id = $1 FOR UPDATE', [incidentId])).rows[0];
+      if (!row) throw new AppError(503, 'EXAM_SNAPSHOT_UNAVAILABLE', 'Trạng thái integrity hiện không khả dụng.');
+      const incident: IntegrityIncident = { incidentId: row.id, startedAt: row.started_at.getTime(), lastSignalAt: serverNow.getTime(), graceEndsAt: row.grace_ends_at.getTime(), lockAt: row.lock_at.getTime(), state: row.state, closedAt: row.closed_at?.getTime() ?? null, closeReason: row.close_reason };
+      const evaluated = evaluateIntegrityIncident(incident, serverNow.getTime());
+      await client.query('UPDATE exam_integrity_incidents SET last_signal_at = $2, state = $3, locked_at = CASE WHEN $3 = \'LOCKED\' THEN COALESCE(locked_at, $2) ELSE locked_at END WHERE id = $1', [row.id, serverNow, evaluated.state]);
+      if (evaluated.locked) {
+        await client.query("UPDATE exam_sessions SET locked_at = COALESCE(locked_at, $2), lock_reason = COALESCE(lock_reason, 'INTEGRITY_INCIDENT') WHERE id = $1", [session.id, serverNow]);
+      }
+      return { recorded: true, counted, reason: classification.reason, ...(await this.integritySnapshot(client, session.id, evaluated.locked ? serverNow : session.locked_at)) };
+    }));
+  }
+
+  async restoreExamIncident(actor: AuthContext, sessionId: string, incidentId: string, idempotencyKey: string): Promise<unknown> {
+    const schoolId = assertSchoolActor(actor);
+    if (actor.role !== 'STUDENT') throw forbidden('Chỉ học sinh trong ca thi mới được phục hồi incident.');
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, `EXAM_INCIDENT_RESTORE:${sessionId}`, idempotencyKey, { sessionId, incidentId }, async () => {
+      const session = await this.loadExamSession(client, actor, sessionId);
+      const clock = await client.query<{ server_now: Date }>('SELECT now() AS server_now');
+      const serverNow = clock.rows[0]?.server_now ?? new Date();
+      const incident = await client.query<{ id: string; closed_at: Date | null }>(
+        'SELECT id, closed_at FROM exam_integrity_incidents WHERE id = $1 AND session_id = $2 FOR UPDATE',
+        [incidentId, session.id],
+      );
+      const row = incident.rows[0];
+      if (!row) throw notFound('Không tìm thấy incident của ca thi.');
+      if (!row.closed_at) {
+        await client.query("UPDATE exam_integrity_incidents SET closed_at = $2, closed_by = $3, close_reason = 'RESTORED' WHERE id = $1", [row.id, serverNow, actor.userId]);
+        await client.query(`
+          INSERT INTO exam_integrity_events (school_id, session_id, kind, incident_id, counted, reason, signal_id, server_now, payload)
+          VALUES ($1, $2, 'integrity_restore', $3, false, 'RESTORED', $4, $5, '{}'::jsonb)
+        `, [schoolId, session.id, row.id, idempotencyKey, serverNow]);
+        await this.audit(client, schoolId, actor.userId, 'EXAM_INCIDENT_RESTORED', 'exam_integrity_incident', row.id, {});
+      }
+      return { sessionId: session.id, incidentId: row.id, state: 'ACTIVE', lockedAt: session.locked_at?.toISOString() ?? null, serverNow: serverNow.toISOString() };
+    }));
+  }
+
+  async closeExamIncident(actor: AuthContext, sessionId: string, input: { incidentId: string; reason: string }, idempotencyKey: string): Promise<unknown> {
+    const schoolId = assertSchoolActor(actor);
+    if (actor.role !== 'SCHOOL_OWNER' && actor.role !== 'TEACHER') throw forbidden('Bạn không có quyền đóng incident ca thi.');
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, `EXAM_INCIDENT_CLOSE:${sessionId}`, idempotencyKey, input, async () => {
+      const session = await this.loadExamStaffSession(client, actor, sessionId);
+      const clock = await client.query<{ server_now: Date }>('SELECT now() AS server_now');
+      const serverNow = clock.rows[0]?.server_now ?? new Date();
+      const incident = await client.query<{ id: string; closed_at: Date | null }>(
+        'SELECT id, closed_at FROM exam_integrity_incidents WHERE id = $1 AND session_id = $2 FOR UPDATE',
+        [input.incidentId, session.id],
+      );
+      const row = incident.rows[0];
+      if (!row) throw notFound('Không tìm thấy incident của ca thi.');
+      if (!row.closed_at) {
+        await client.query('UPDATE exam_integrity_incidents SET closed_at = $2, closed_by = $3, close_reason = $4 WHERE id = $1', [row.id, serverNow, actor.userId, input.reason]);
+        await client.query(`
+          INSERT INTO exam_integrity_events (school_id, session_id, kind, incident_id, counted, reason, signal_id, server_now, payload)
+          VALUES ($1, $2, 'integrity_close', $3, false, 'CLOSED', $4, $5, $6::jsonb)
+        `, [schoolId, session.id, row.id, idempotencyKey, serverNow, JSON.stringify({ reason: input.reason })]);
+        await this.audit(client, schoolId, actor.userId, 'EXAM_INCIDENT_CLOSED', 'exam_integrity_incident', row.id, { reason: input.reason });
+      }
+      return { sessionId: session.id, incidentId: row.id, state: 'ACTIVE', lockedAt: session.locked_at?.toISOString() ?? null, serverNow: serverNow.toISOString() };
+    }));
+  }
+
+  async unlockExamSession(actor: AuthContext, sessionId: string, reason: string, idempotencyKey: string): Promise<unknown> {
+    const schoolId = assertSchoolActor(actor);
+    if (actor.role !== 'SCHOOL_OWNER' && actor.role !== 'TEACHER') throw forbidden('Bạn không có quyền mở khóa ca thi.');
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, `EXAM_SESSION_UNLOCK:${sessionId}`, idempotencyKey, { sessionId, reason }, async () => {
+      const session = await this.loadExamStaffSession(client, actor, sessionId);
+      const clock = await client.query<{ server_now: Date }>('SELECT now() AS server_now');
+      const serverNow = clock.rows[0]?.server_now ?? new Date();
+      if (session.submitted_at) throw conflict('EXAM_ALREADY_SUBMITTED', 'Ca thi đã nộp.');
+      if (!session.locked_at) return { sessionId: session.id, state: 'ACTIVE', unlocked: false, lockedAt: null, serverNow: serverNow.toISOString() };
+      await client.query('UPDATE exam_sessions SET locked_at = NULL, lock_reason = NULL, last_heartbeat_at = $2 WHERE id = $1', [session.id, serverNow]);
+      const incidents = await client.query<{ id: string }>(`UPDATE exam_integrity_incidents SET closed_at = COALESCE(closed_at, $2), closed_by = COALESCE(closed_by, $3), close_reason = COALESCE(close_reason, 'PROCTOR_UNLOCK') WHERE session_id = $1 AND closed_at IS NULL RETURNING id`, [session.id, serverNow, actor.userId]);
+      await client.query(`
+        INSERT INTO exam_integrity_events (school_id, session_id, kind, incident_id, counted, reason, signal_id, server_now, payload)
+        VALUES ($1, $2, 'integrity_unlock', $3, false, 'PROCTOR_UNLOCK', $4, $5, $6::jsonb)
+      `, [schoolId, session.id, incidents.rows[0]?.id ?? null, idempotencyKey, serverNow, JSON.stringify({ reason })]);
+      await this.audit(client, schoolId, actor.userId, 'EXAM_SESSION_UNLOCKED', 'exam_session', session.id, { reason });
+      return { sessionId: session.id, state: 'ACTIVE', unlocked: true, lockedAt: null, serverNow: serverNow.toISOString() };
+    }));
   }
 
   async submitExamSession(actor: AuthContext, sessionId: string, idempotencyKey: string): Promise<unknown> {
@@ -4056,45 +4187,40 @@ export class PostgresPlatformRepository implements PlatformRepository {
     return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => this.idempotent(client, schoolId, actor.userId, `EXAM_SUBMIT:${sessionId}`, idempotencyKey, { sessionId }, async () => {
       const session = await this.loadExamSession(client, actor, sessionId);
       if (session.submitted_at) return { sessionId, alreadySubmitted: true };
-      const locked = Boolean(session.locked_at);
-      const items = await client.query<AssignmentItemRow>(`
-        SELECT ai.id, ai.points, qv.type, qv.answer_key, ai.question_version_id
-        FROM assignment_items ai JOIN question_versions qv ON qv.id = ai.question_version_id
-        WHERE ai.assignment_id = $1 ORDER BY ai.position
-      `, [session.assignment_id]);
+      const snapshot = await this.snapshotForSession(client, session.id, session.assignment_id);
       const saved = await client.query<{ assignment_item_id: string; answer: unknown }>('SELECT assignment_item_id, answer FROM submission_answers WHERE attempt_id = $1', [session.attempt_id]);
       const answersByItem = new Map(saved.rows.map((row) => [row.assignment_item_id, jsonRecord(row.answer)]));
       const gradingResults: GradingResult[] = [];
-      for (const item of items.rows) {
-        const points = numeric(item.points);
-        const answer = answersByItem.get(item.id) ?? {};
-        const graded = gradeAnswer({ type: item.type, maxScore: points, answerKey: jsonRecord(item.answer_key) }, answer);
+      for (const item of snapshot.items) {
+        const points = item.points;
+        const answer = answersByItem.get(item.assignmentItemId) ?? {};
+        const graded = gradeAnswer({ type: item.type as QuestionType, maxScore: points, answerKey: item.answerKey }, answer);
         gradingResults.push(graded);
         await client.query(`
           INSERT INTO submission_answers (school_id, attempt_id, assignment_item_id, answer, auto_score)
           VALUES ($1, $2, $3, $4::jsonb, $5)
           ON CONFLICT (attempt_id, assignment_item_id) DO UPDATE SET auto_score = EXCLUDED.auto_score, answer = EXCLUDED.answer
-        `, [schoolId, session.attempt_id, item.id, JSON.stringify(answer), graded.score]);
+        `, [schoolId, session.attempt_id, item.assignmentItemId, JSON.stringify(answer), graded.score]);
       }
       const scoreSummary = summarizeAttemptScores(gradingResults);
       const requiresTeacherMark = scoreSummary.status === 'PROVISIONAL';
       const status = requiresTeacherMark ? 'SUBMITTED' : 'GRADED';
       await client.query("UPDATE assignment_attempts SET status = $2::attempt_status, submitted_at = now(), graded_at = CASE WHEN $2::text = 'GRADED' THEN now() ELSE NULL END WHERE id = $1", [session.attempt_id, status]);
-      await client.query("UPDATE exam_sessions SET submitted_at = now(), finalized_at = now(), finalization_reason = CASE WHEN $2 THEN 'INTEGRITY_LOCK' ELSE 'STUDENT_SUBMIT' END WHERE id = $1", [session.id, locked]);
+      await client.query("UPDATE exam_sessions SET submitted_at = now(), finalized_at = now(), finalization_reason = 'STUDENT_SUBMIT' WHERE id = $1", [session.id]);
       const show = await client.query<{ show_score_on_submit: boolean; class_id: string; subject_id: string }>('SELECT show_score_on_submit, class_id, subject_id FROM assignments WHERE id = $1', [session.assignment_id]);
       if (!requiresTeacherMark) await this.refreshOfficialGradebook(client, schoolId, session.assignment_id, actor.userId, actor.userId, 'AUTO');
       await this.audit(client, schoolId, actor.userId, 'EXAM_SESSION_SUBMITTED', 'exam_session', session.id, { status });
       return {
         sessionId,
         status,
-        questionCount: items.rows.length,
+        questionCount: snapshot.items.length,
          autoScore: show.rows[0]?.show_score_on_submit ? scoreSummary.score : null,
          maxScore: show.rows[0]?.show_score_on_submit ? scoreSummary.maxScore : null,
          provisionalMaxScore: show.rows[0]?.show_score_on_submit ? scoreSummary.gradedMaxScore : null,
          pendingCount: scoreSummary.pendingCount,
          gradingStatus: scoreSummary.status,
          requiresTeacherMark,
-         locked,
+         locked: Boolean(session.locked_at),
       };
     }));
   }
@@ -4127,8 +4253,8 @@ export class PostgresPlatformRepository implements PlatformRepository {
         ? await client.query<{ ok: boolean }>('SELECT EXISTS (SELECT 1 FROM exam_proctors WHERE assignment_id = $1 AND user_id = $2) AS ok', [assignmentId, actor.userId])
         : { rows: [{ ok: true }] };
       if (!proctor.rows[0]?.ok) await this.assertTeacherCanManage(client, actor, assignment.rows[0].class_id, assignment.rows[0].subject_id);
-      const rows = await client.query<{ id: string; kind: string; occurred_at: Date; display_name: string; student_code: string | null; payload: unknown }>(`
-        SELECT e.id, e.kind, e.occurred_at, u.display_name, sp.student_code, e.payload
+      const rows = await client.query<{ id: string; kind: string; occurred_at: Date; server_now: Date; incident_id: string | null; counted: boolean; reason: string | null; display_name: string; student_code: string | null; payload: unknown }>(`
+        SELECT e.id, e.kind, e.occurred_at, e.server_now, e.incident_id, e.counted, e.reason, u.display_name, sp.student_code, e.payload
         FROM exam_integrity_events e
         JOIN exam_sessions s ON s.id = e.session_id
         JOIN users u ON u.id = s.student_id
@@ -4137,7 +4263,7 @@ export class PostgresPlatformRepository implements PlatformRepository {
         ORDER BY e.occurred_at DESC
         LIMIT 500
       `, [assignmentId]);
-      return rows.rows.map((row) => ({ id: row.id, kind: row.kind, occurredAt: row.occurred_at.toISOString(), studentName: row.display_name, studentCode: row.student_code, payload: jsonRecord(row.payload) }));
+      return rows.rows.map((row) => ({ id: row.id, kind: row.kind, occurredAt: row.occurred_at.toISOString(), serverNow: row.server_now.toISOString(), incidentId: row.incident_id, counted: row.counted, reason: row.reason, studentName: row.display_name, studentCode: row.student_code, payload: jsonRecord(row.payload) }));
     });
   }
 
@@ -4480,9 +4606,222 @@ export class PostgresPlatformRepository implements PlatformRepository {
     if (status === 'SUSPENDED') throw forbidden('Gói trường đang tạm dừng. Em vẫn xem catalog và kết quả đã lưu.');
   }
 
-  private async loadExamSession(client: pg.PoolClient, actor: AuthContext, sessionId: string): Promise<{ id: string; assignment_id: string; attempt_id: string; ends_at: Date; submitted_at: Date | null; locked_at: Date | null; shuffle_seed: unknown }> {
-    const session = await client.query<{ id: string; assignment_id: string; attempt_id: string | null; ends_at: Date; submitted_at: Date | null; locked_at: Date | null; shuffle_seed: unknown }>(
-      'SELECT id, assignment_id, attempt_id, ends_at, submitted_at, locked_at, shuffle_seed FROM exam_sessions WHERE id = $1 AND student_id = $2',
+  private snapshotKeyring(): ExamSnapshotKeyring {
+    if (!this.examSnapshotKeyring) throw new AppError(503, 'EXAM_SNAPSHOT_UNAVAILABLE', 'Nội dung kỳ thi hiện không khả dụng.');
+    return this.examSnapshotKeyring;
+  }
+
+  private async createExamSnapshot(
+    client: pg.PoolClient,
+    input: { schoolId: string; assignmentId: string; assignmentVersion: number; encryptionRevision: number; createdBy: string; supersedesSnapshotId?: string | null },
+  ): Promise<{ id: string; metadataHash: string }> {
+    const rows = await client.query<{ id: string; question_version_id: string; position: number; points: string; type: string; prompt: unknown; answer_key: unknown; rubric: unknown }>(`
+      SELECT ai.id, ai.question_version_id, ai.position, ai.points::text, qv.type::text, qv.prompt, qv.answer_key, qv.rubric
+      FROM assignment_items ai
+      JOIN question_versions qv ON qv.id = ai.question_version_id
+      WHERE ai.assignment_id = $1
+      ORDER BY ai.position
+    `, [input.assignmentId]);
+    if (rows.rows.length === 0) throw unprocessable('Đề thi phải có ít nhất một câu hỏi.', 'EXAM_SNAPSHOT_EMPTY');
+
+    const metadata: ExamSnapshotMetadata = {
+      schemaVersion: 1,
+      schoolId: input.schoolId,
+      assignmentId: input.assignmentId,
+      assignmentVersion: input.assignmentVersion,
+      itemIds: rows.rows.map((row) => row.id),
+      itemCount: rows.rows.length,
+    };
+    const plaintext: ExamSnapshotPlaintext = {
+      schemaVersion: 1,
+      assignmentId: input.assignmentId,
+      assignmentVersion: input.assignmentVersion,
+      items: rows.rows.map((row) => ({
+        assignmentItemId: row.id,
+        questionVersionId: row.question_version_id,
+        position: row.position,
+        points: numeric(row.points),
+        type: row.type,
+        prompt: jsonRecord(row.prompt),
+        answerKey: jsonRecord(row.answer_key),
+        rubric: jsonRecord(row.rubric),
+      })),
+    };
+    const encrypted = encryptExamSnapshot({ keyVersion: this.snapshotKeyring().activeKeyVersion, metadata, plaintext }, this.snapshotKeyring());
+    const inserted = await client.query<{ id: string }>(`
+      INSERT INTO exam_snapshots (
+        school_id, assignment_id, snapshot_version, encryption_revision, ciphertext, nonce, auth_tag,
+        key_version, metadata_hash, metadata, supersedes_snapshot_id, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12)
+      ON CONFLICT (assignment_id, snapshot_version, encryption_revision) DO NOTHING
+      RETURNING id
+    `, [input.schoolId, input.assignmentId, input.assignmentVersion, input.encryptionRevision, encrypted.ciphertext, encrypted.nonce, encrypted.authTag, encrypted.keyVersion, encrypted.metadataHash, JSON.stringify(encrypted.metadata), input.supersedesSnapshotId ?? null, input.createdBy]);
+    if (inserted.rows[0]) return { id: inserted.rows[0].id, metadataHash: encrypted.metadataHash };
+    const existing = await client.query<{ id: string; metadata_hash: string }>(`
+      SELECT id, metadata_hash::text FROM exam_snapshots
+      WHERE assignment_id = $1 AND snapshot_version = $2 AND encryption_revision = $3
+    `, [input.assignmentId, input.assignmentVersion, input.encryptionRevision]);
+    if (!existing.rows[0] || existing.rows[0].metadata_hash.trim() !== encrypted.metadataHash) {
+      throw new AppError(503, 'EXAM_SNAPSHOT_UNAVAILABLE', 'Nội dung kỳ thi hiện không khả dụng.');
+    }
+    return { id: existing.rows[0].id, metadataHash: encrypted.metadataHash };
+  }
+
+  async backfillExamSnapshots(): Promise<number> {
+    const keyring = this.snapshotKeyring();
+    void keyring;
+    const assignments = await this.options.controlPool.query<{ id: string; school_id: string; created_by: string }>(`
+      SELECT id, school_id, created_by
+      FROM assignments
+      WHERE delivery_mode = 'EXAM' AND status IN ('PUBLISHED', 'CLOSED') AND active_exam_snapshot_id IS NULL
+      ORDER BY created_at, id
+    `);
+    let backfilled = 0;
+    for (const assignment of assignments.rows) {
+      const changed = await withTenantTransaction(this.options.controlPool, {}, async (client) => {
+        const locked = await client.query<{ active_exam_snapshot_id: string | null }>(
+          'SELECT active_exam_snapshot_id FROM assignments WHERE id = $1 FOR UPDATE',
+          [assignment.id],
+        );
+        if (!locked.rows[0] || locked.rows[0].active_exam_snapshot_id) return false;
+        const snapshot = await this.createExamSnapshot(client, {
+          schoolId: assignment.school_id,
+          assignmentId: assignment.id,
+          assignmentVersion: 1,
+          encryptionRevision: 1,
+          createdBy: assignment.created_by,
+        });
+        await client.query('UPDATE assignments SET active_exam_snapshot_id = $2 WHERE id = $1', [assignment.id, snapshot.id]);
+        await this.audit(client, assignment.school_id, assignment.created_by, 'EXAM_SNAPSHOT_BACKFILLED', 'exam_snapshot', snapshot.id, { assignmentId: assignment.id, metadataHash: snapshot.metadataHash });
+        return true;
+      });
+      if (changed) backfilled += 1;
+    }
+    return backfilled;
+  }
+
+  async rotateExamSnapshot(actor: AuthContext, assignmentId: string): Promise<unknown> {
+    const schoolId = assertSchoolActor(actor);
+    if (actor.role !== 'SCHOOL_OWNER') throw forbidden('Chỉ hiệu trưởng được xoay khóa snapshot đề thi.');
+    return withTenantTransaction(this.options.apiPool, { schoolId, userId: actor.userId }, async (client) => {
+      const current = await client.query<{ id: string; snapshot_version: number; encryption_revision: number; key_version: string; ciphertext: Buffer; nonce: Buffer; auth_tag: Buffer; metadata_hash: string; metadata: unknown }>(`
+        SELECT es.id, es.snapshot_version, es.encryption_revision, es.key_version, es.ciphertext, es.nonce, es.auth_tag, es.metadata_hash::text, es.metadata
+        FROM assignments a JOIN exam_snapshots es ON es.id = a.active_exam_snapshot_id
+        WHERE a.id = $1 AND a.school_id = $2 AND a.delivery_mode = 'EXAM'
+        FOR UPDATE OF a
+      `, [assignmentId, schoolId]);
+      const source = current.rows[0];
+      if (!source) throw notFound('Không tìm thấy snapshot đề thi cần xoay khóa.');
+      if (source.key_version === this.snapshotKeyring().activeKeyVersion) return { id: source.id, rotated: false, keyVersion: source.key_version };
+      const plaintext = decryptExamSnapshot({ keyVersion: source.key_version, metadata: jsonRecord(source.metadata) as unknown as ExamSnapshotMetadata, metadataHash: source.metadata_hash.trim(), ciphertext: source.ciphertext, nonce: source.nonce, authTag: source.auth_tag }, this.snapshotKeyringForVersion(source.key_version));
+      const metadata = jsonRecord(source.metadata) as unknown as ExamSnapshotMetadata;
+      const encrypted = encryptExamSnapshot({ keyVersion: this.snapshotKeyring().activeKeyVersion, metadata, plaintext }, this.snapshotKeyring());
+      const inserted = await client.query<{ id: string }>(`
+        INSERT INTO exam_snapshots (school_id, assignment_id, snapshot_version, encryption_revision, ciphertext, nonce, auth_tag, key_version, metadata_hash, metadata, supersedes_snapshot_id, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12)
+        ON CONFLICT (assignment_id, snapshot_version, encryption_revision) DO NOTHING
+        RETURNING id
+      `, [schoolId, assignmentId, source.snapshot_version, source.encryption_revision + 1, encrypted.ciphertext, encrypted.nonce, encrypted.authTag, encrypted.keyVersion, encrypted.metadataHash, JSON.stringify(metadata), source.id, actor.userId]);
+      const snapshotId = inserted.rows[0]?.id ?? (await client.query<{ id: string }>('SELECT id FROM exam_snapshots WHERE assignment_id = $1 AND snapshot_version = $2 AND encryption_revision = $3', [assignmentId, source.snapshot_version, source.encryption_revision + 1])).rows[0]?.id;
+      if (!snapshotId) throw new AppError(503, 'EXAM_SNAPSHOT_UNAVAILABLE', 'Không thể hoàn tất xoay khóa snapshot đề thi.');
+      await client.query('UPDATE assignments SET active_exam_snapshot_id = $2 WHERE id = $1', [assignmentId, snapshotId]);
+      await this.audit(client, schoolId, actor.userId, 'EXAM_SNAPSHOT_ROTATED', 'exam_snapshot', snapshotId, { assignmentId, supersedesSnapshotId: source.id, keyVersion: encrypted.keyVersion });
+      return { id: snapshotId, rotated: true, keyVersion: encrypted.keyVersion };
+    });
+  }
+
+  private snapshotKeyringForVersion(keyVersion: string): ExamSnapshotKeyring {
+    const keyring = this.snapshotKeyring();
+    if (!keyring.keys[keyVersion]) throw new AppError(503, 'EXAM_SNAPSHOT_UNAVAILABLE', 'Nội dung kỳ thi hiện không khả dụng.');
+    return keyring;
+  }
+
+  private async snapshotForAssignment(client: pg.PoolClient, assignmentId: string): Promise<ExamSnapshotPlaintext> {
+    const result = await client.query<{ assignment_id: string; key_version: string; ciphertext: Buffer; nonce: Buffer; auth_tag: Buffer; metadata_hash: string; metadata: unknown }>(`
+      SELECT a.id AS assignment_id, es.key_version, es.ciphertext, es.nonce, es.auth_tag, es.metadata_hash::text, es.metadata
+      FROM assignments a JOIN exam_snapshots es ON es.id = a.active_exam_snapshot_id
+      WHERE a.id = $1 AND a.delivery_mode = 'EXAM'
+    `, [assignmentId]);
+    const row = result.rows[0];
+    if (!row) throw new AppError(503, 'EXAM_SNAPSHOT_UNAVAILABLE', 'Nội dung kỳ thi hiện không khả dụng.');
+    const metadata = jsonRecord(row.metadata) as unknown as ExamSnapshotMetadata;
+    const plaintext = decryptExamSnapshot({ keyVersion: row.key_version, ciphertext: row.ciphertext, nonce: row.nonce, authTag: row.auth_tag, metadataHash: row.metadata_hash.trim(), metadata }, this.snapshotKeyringForVersion(row.key_version));
+    if (plaintext.assignmentId !== row.assignment_id || plaintext.items.length !== metadata.itemCount) throw new AppError(503, 'EXAM_SNAPSHOT_UNAVAILABLE', 'Nội dung kỳ thi hiện không khả dụng.');
+    return plaintext;
+  }
+
+  private async snapshotForSession(client: pg.PoolClient, sessionId: string, assignmentId: string): Promise<ExamSnapshotPlaintext> {
+    const result = await client.query<{ assignment_id: string; exam_snapshot_id: string | null; key_version: string | null; ciphertext: Buffer | null; nonce: Buffer | null; auth_tag: Buffer | null; metadata_hash: string | null; metadata: unknown }>(`
+      SELECT es.assignment_id, es.exam_snapshot_id, snap.key_version, snap.ciphertext, snap.nonce, snap.auth_tag, snap.metadata_hash::text, snap.metadata
+      FROM exam_sessions es LEFT JOIN exam_snapshots snap ON snap.id = es.exam_snapshot_id
+      WHERE es.id = $1 AND es.assignment_id = $2
+    `, [sessionId, assignmentId]);
+    const row = result.rows[0];
+    if (!row || !row.exam_snapshot_id || !row.key_version || !row.ciphertext || !row.nonce || !row.auth_tag || !row.metadata_hash) throw new AppError(503, 'EXAM_SNAPSHOT_UNAVAILABLE', 'Nội dung kỳ thi hiện không khả dụng.');
+    const metadata = jsonRecord(row.metadata) as unknown as ExamSnapshotMetadata;
+    const plaintext = decryptExamSnapshot({ keyVersion: row.key_version, ciphertext: row.ciphertext, nonce: row.nonce, authTag: row.auth_tag, metadataHash: row.metadata_hash.trim(), metadata }, this.snapshotKeyringForVersion(row.key_version));
+    if (plaintext.assignmentId !== row.assignment_id || plaintext.items.length !== metadata.itemCount) throw new AppError(503, 'EXAM_SNAPSHOT_UNAVAILABLE', 'Nội dung kỳ thi hiện không khả dụng.');
+    return plaintext;
+  }
+
+  private async integritySnapshot(client: pg.PoolClient, sessionId: string, sessionLockedAt: Date | null = null): Promise<{ state: IntegrityState; incidentId: string | null; graceEndsAt: string | null; lockAt: string | null; remainingMs: number; lockedAt: string | null; serverNow: string }> {
+    const clock = await client.query<{ server_now: Date }>('SELECT now() AS server_now');
+    const serverNow = clock.rows[0]?.server_now ?? new Date();
+    const incident = await client.query<{ id: string; state: Exclude<IntegrityState, 'ACTIVE'>; started_at: Date; last_signal_at: Date; grace_ends_at: Date; lock_at: Date; locked_at: Date | null; closed_at: Date | null; close_reason: string | null }>(`
+      SELECT id, state, started_at, last_signal_at, grace_ends_at, lock_at, locked_at, closed_at, close_reason
+      FROM exam_integrity_incidents
+      WHERE session_id = $1 AND closed_at IS NULL
+      ORDER BY started_at DESC
+      LIMIT 1
+    `, [sessionId]);
+    const row = incident.rows[0];
+    if (!row) return { state: 'ACTIVE', incidentId: null, graceEndsAt: null, lockAt: null, remainingMs: 0, lockedAt: sessionLockedAt?.toISOString() ?? null, serverNow: serverNow.toISOString() };
+    const model: IntegrityIncident = {
+      incidentId: row.id,
+      startedAt: row.started_at.getTime(),
+      lastSignalAt: row.last_signal_at.getTime(),
+      graceEndsAt: row.grace_ends_at.getTime(),
+      lockAt: row.lock_at.getTime(),
+      state: row.state,
+      closedAt: row.closed_at?.getTime() ?? null,
+      closeReason: row.close_reason,
+    };
+    const evaluated = evaluateIntegrityIncident(model, serverNow.getTime());
+    if (evaluated.state !== row.state || (evaluated.locked && !row.locked_at)) {
+      await client.query('UPDATE exam_integrity_incidents SET state = $2, locked_at = CASE WHEN $2 = \'LOCKED\' THEN COALESCE(locked_at, $3) ELSE locked_at END WHERE id = $1', [row.id, evaluated.state, serverNow]);
+    }
+    let lockedAt = sessionLockedAt?.toISOString() ?? row.locked_at?.toISOString() ?? null;
+    if (evaluated.locked && !lockedAt) {
+      await client.query("UPDATE exam_sessions SET locked_at = COALESCE(locked_at, $2), lock_reason = COALESCE(lock_reason, 'INTEGRITY_INCIDENT') WHERE id = $1", [sessionId, serverNow]);
+      lockedAt = serverNow.toISOString();
+    }
+    return { state: evaluated.state, incidentId: row.id, graceEndsAt: row.grace_ends_at.toISOString(), lockAt: row.lock_at.toISOString(), remainingMs: evaluated.remainingMs, lockedAt, serverNow: serverNow.toISOString() };
+  }
+
+  private async loadExamStaffSession(client: pg.PoolClient, actor: AuthContext, sessionId: string): Promise<{ id: string; school_id: string; assignment_id: string; class_id: string; subject_id: string; submitted_at: Date | null; locked_at: Date | null; ends_at: Date }> {
+    const result = await client.query<{ id: string; school_id: string; assignment_id: string; class_id: string; subject_id: string; submitted_at: Date | null; locked_at: Date | null; ends_at: Date }>(`
+      SELECT es.id, es.school_id, es.assignment_id, a.class_id, a.subject_id, es.submitted_at, es.locked_at, es.ends_at
+      FROM exam_sessions es JOIN assignments a ON a.id = es.assignment_id
+      WHERE es.id = $1 AND es.school_id = $2
+      FOR UPDATE OF es
+    `, [sessionId, actor.schoolId]);
+    const session = result.rows[0];
+    if (!session) throw notFound('Không tìm thấy ca thi.');
+    if (actor.role === 'SCHOOL_OWNER') return session;
+    const allowed = await client.query<{ allowed: boolean }>(`
+      SELECT EXISTS (
+        SELECT 1 FROM exam_proctors WHERE assignment_id = $1 AND user_id = $2
+      ) OR EXISTS (
+        SELECT 1 FROM class_teacher_assignments WHERE class_id = $3 AND teacher_id = $2 AND (role = 'HOMEROOM_TEACHER' OR subject_id = $4)
+      ) AS allowed
+    `, [session.assignment_id, actor.userId, session.class_id, session.subject_id]);
+    if (!allowed.rows[0]?.allowed) throw forbidden('Bạn chưa được phân công giám sát ca thi này.');
+    return session;
+  }
+
+  private async loadExamSession(client: pg.PoolClient, actor: AuthContext, sessionId: string): Promise<{ id: string; assignment_id: string; attempt_id: string; exam_snapshot_id: string | null; ends_at: Date; submitted_at: Date | null; locked_at: Date | null; shuffle_seed: unknown }> {
+    const session = await client.query<{ id: string; assignment_id: string; attempt_id: string | null; exam_snapshot_id: string | null; ends_at: Date; submitted_at: Date | null; locked_at: Date | null; shuffle_seed: unknown }>(
+      'SELECT id, assignment_id, attempt_id, exam_snapshot_id, ends_at, submitted_at, locked_at, shuffle_seed FROM exam_sessions WHERE id = $1 AND student_id = $2',
       [sessionId, actor.userId],
     );
     const row = session.rows[0];

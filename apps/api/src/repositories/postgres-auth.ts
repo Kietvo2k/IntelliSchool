@@ -1,4 +1,5 @@
 ﻿import type pg from 'pg';
+import { createHash } from 'node:crypto';
 import { verifyPassword } from '../security/passwords.js';
 import { createSessionToken, hashToken } from '../security/tokens.js';
 import { AppError } from '../errors.js';
@@ -108,18 +109,38 @@ export class PostgresAuthRepository {
     }));
   }
 
-  async revokeSessionById(userId: string, sessionId: string): Promise<void> {
-    await this.pool.query(`
-      UPDATE sessions SET revoked_at = COALESCE(revoked_at, now())
-      WHERE id = $1 AND user_id = $2
-    `, [sessionId, userId]);
+  async revokeSessionById(userId: string, sessionId: string, idempotencyKey: string): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await this.idempotent(client, userId, 'SESSION_REVOKE', idempotencyKey, { sessionId }, async () => {
+        const result = await client.query<{ id: string; active_school_id: string | null }>(`
+          UPDATE sessions SET revoked_at = COALESCE(revoked_at, now())
+          WHERE id = $1 AND user_id = $2
+          RETURNING id, active_school_id
+        `, [sessionId, userId]);
+        if (result.rows[0]) await client.query(`INSERT INTO audit_events (school_id, actor_id, action, target_type, target_id, metadata) VALUES ($1, $2, 'SESSION_REVOKED', 'session', $3, '{}'::jsonb)`, [result.rows[0].active_school_id, userId, result.rows[0].id]);
+        return { revoked: Boolean(result.rows[0]) };
+      });
+      await client.query('COMMIT');
+    } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   }
 
-  async revokeOtherSessions(userId: string, currentToken: string): Promise<void> {
-    await this.pool.query(`
-      UPDATE sessions SET revoked_at = COALESCE(revoked_at, now())
-      WHERE user_id = $1 AND token_hash <> $2 AND revoked_at IS NULL
-    `, [userId, hashToken(currentToken)]);
+  async revokeOtherSessions(userId: string, currentToken: string, idempotencyKey: string): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await this.idempotent(client, userId, 'SESSION_REVOKE_OTHERS', idempotencyKey, { currentTokenHash: hashToken(currentToken).toString('hex') }, async () => {
+        const result = await client.query<{ id: string; active_school_id: string | null }>(`
+          UPDATE sessions SET revoked_at = COALESCE(revoked_at, now())
+          WHERE user_id = $1 AND token_hash <> $2 AND revoked_at IS NULL
+          RETURNING id, active_school_id
+        `, [userId, hashToken(currentToken)]);
+        for (const row of result.rows) await client.query(`INSERT INTO audit_events (school_id, actor_id, action, target_type, target_id, metadata) VALUES ($1, $2, 'SESSION_REVOKED', 'session', $3, '{}'::jsonb)`, [row.active_school_id, userId, row.id]);
+        return { revoked: result.rowCount ?? 0 };
+      });
+      await client.query('COMMIT');
+    } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   }
 
   async requestPasswordReset(email: string): Promise<string | null> {
@@ -185,5 +206,19 @@ export class PostgresAuthRepository {
       [user.userId, hashToken(token), user.schoolId ?? null, expiresAt],
     );
     return { token, expiresAt, user };
+  }
+
+  private async idempotent<T>(client: pg.PoolClient, actorId: string, operation: string, idempotencyKey: string, request: unknown, work: () => Promise<T>): Promise<T> {
+    const requestHash = createHash('sha256').update(JSON.stringify(request)).digest('hex');
+    const existing = await client.query<{ request_hash: string; response: T | null }>('SELECT request_hash, response FROM idempotency_records WHERE actor_id = $1 AND operation = $2 AND idempotency_key = $3 FOR UPDATE', [actorId, operation, idempotencyKey]);
+    if (existing.rows[0]) {
+      if (existing.rows[0].request_hash !== requestHash) throw new AppError(409, 'IDEMPOTENCY_KEY_REUSED', 'X-Idempotency-Key đã được dùng cho một nội dung khác.');
+      if (existing.rows[0].response === null) throw new AppError(409, 'IDEMPOTENCY_IN_PROGRESS', 'Yêu cầu trước đó đang được xử lý.');
+      return existing.rows[0].response;
+    }
+    await client.query('INSERT INTO idempotency_records (school_id, actor_id, operation, idempotency_key, request_hash) VALUES (NULL, $1, $2, $3, $4)', [actorId, operation, idempotencyKey, requestHash]);
+    const response = await work();
+    await client.query('UPDATE idempotency_records SET response = $4::jsonb, completed_at = now() WHERE actor_id = $1 AND operation = $2 AND idempotency_key = $3', [actorId, operation, idempotencyKey, JSON.stringify(response)]);
+    return response;
   }
 }

@@ -42,7 +42,7 @@ export interface SchoolAdministrationRepository {
   listSchoolRequests(): Promise<SchoolRequest[]>;
   approveSchoolRequest(id: string, reviewedBy: string, reason: string, idempotencyKey?: string): Promise<{ request: SchoolRequest; school: School; activationEmailQueued?: boolean } | null>;
   resendSchoolActivation(id: string, reviewedBy: string, idempotencyKey: string): Promise<{ requestId: string; activationEmailQueued: boolean }>;
-  rejectSchoolRequest(id: string, reviewedBy: string, reason: string): Promise<SchoolRequest | null>;
+  rejectSchoolRequest(id: string, reviewedBy: string, reason: string, idempotencyKey: string): Promise<SchoolRequest | null>;
   createStudent(actor: AuthContext, input: CreateStudentInput, idempotencyKey: string): Promise<unknown>;
   inviteTeacher(actor: AuthContext, input: InviteTeacherInput, idempotencyKey: string): Promise<unknown>;
   acceptInvitation(token: string, newPassword: string): Promise<AcceptedInvitation>;
