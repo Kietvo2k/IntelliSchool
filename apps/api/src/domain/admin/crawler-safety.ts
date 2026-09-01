@@ -1,5 +1,6 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { request as httpsRequest } from 'node:https';
 import { AppError } from '../../errors.js';
 
 /** Validates a queue request before the worker resolves or fetches a remote URL. */
@@ -22,6 +23,7 @@ export function assertCrawlUrlIsSafe(rawUrl: string, allowedHosts: ReadonlySet<s
 type ResolvedAddress = { address: string; family: 4 | 6 };
 type AddressResolver = (hostname: string, options: { all: true }) => Promise<ResolvedAddress[]>;
 const defaultAddressResolver: AddressResolver = (hostname, options) => lookup(hostname, options) as Promise<ResolvedAddress[]>;
+const MAX_CRAWL_RESPONSE_BYTES = 1_000_000;
 
 function privateIpv4(address: string): boolean {
   const octets = address.split('.').map(Number);
@@ -30,6 +32,7 @@ function privateIpv4(address: string): boolean {
   return first === 0 || first === 10 || first === 127 || (first === 100 && second! >= 64 && second! <= 127)
     || (first === 169 && second === 254) || (first === 172 && second! >= 16 && second! <= 31)
     || (first === 192 && (second === 0 || second === 168)) || (first === 198 && second! >= 18 && second! <= 19)
+    || (first === 198 && second === 51) || (first === 203 && second === 0)
     || first! >= 224;
 }
 
@@ -71,11 +74,11 @@ function privateIp(address: string): boolean {
   if (mapped) return privateIpv4(`${words[6]! >> 8}.${words[6]! & 255}.${words[7]! >> 8}.${words[7]! & 255}`);
   const first = words[0]!;
   return words.every((word) => word === 0) || (words.slice(0, 7).every((word) => word === 0) && words[7] === 1)
-    || (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80 || (first & 0xff00) === 0xff00;
+    || (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80 || (first & 0xff00) === 0xff00
+    || (first === 0x2001 && (words[1] === 0x0002 || words[1] === 0x0db8));
 }
 
-/** Resolves every DNS record and rejects the hostname if any address is non-public. */
-export async function assertCrawlUrlResolvesToPublic(url: URL, resolver: AddressResolver = defaultAddressResolver): Promise<URL> {
+async function resolvePublicAddresses(url: URL, resolver: AddressResolver = defaultAddressResolver): Promise<ResolvedAddress[]> {
   let addresses: ResolvedAddress[];
   try {
     addresses = await resolver(url.hostname, { all: true });
@@ -85,20 +88,63 @@ export async function assertCrawlUrlResolvesToPublic(url: URL, resolver: Address
   if (!addresses.length || addresses.some((item) => privateIp(item.address))) {
     throw new AppError(422, 'CRAWL_IP_NOT_ALLOWED', 'URL crawl không được trỏ tới địa chỉ mạng riêng hoặc dành riêng.');
   }
+  return addresses;
+}
+
+/** Resolves every DNS record and rejects the hostname if any address is non-public. */
+export async function assertCrawlUrlResolvesToPublic(url: URL, resolver: AddressResolver = defaultAddressResolver): Promise<URL> {
+  await resolvePublicAddresses(url, resolver);
   return url;
 }
 
-export async function fetchAllowlistedExcerpt(url: URL, fetcher: typeof fetch = fetch): Promise<{ status: 'READY' | 'FAILED'; result: Record<string, unknown> }> {
+async function fetchPinned(url: URL): Promise<{ status: number; ok: boolean; text(): Promise<string> }> {
+  const addresses = await resolvePublicAddresses(url);
+  const address = addresses[0]!.address;
+  return new Promise((resolve, reject) => {
+    const request = httpsRequest({
+      hostname: address,
+      port: url.port ? Number(url.port) : 443,
+      path: `${url.pathname}${url.search}`,
+      method: 'GET',
+      headers: { host: url.host, 'user-agent': 'SmartPathCatalogBot/1.0' },
+      servername: url.hostname,
+      rejectUnauthorized: true,
+      timeout: 8_000,
+    }, (response) => {
+      const declaredLength = Number(response.headers['content-length'] ?? 0);
+      if (declaredLength > MAX_CRAWL_RESPONSE_BYTES) {
+        response.resume();
+        request.destroy();
+        reject(new Error('crawl_response_too_large'));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      let total = 0;
+      response.on('data', (chunk: Buffer) => {
+        total += chunk.length;
+        if (total > MAX_CRAWL_RESPONSE_BYTES) {
+          response.destroy(new Error('crawl_response_too_large'));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.on('error', reject);
+      response.on('end', () => resolve({ status: response.statusCode ?? 502, ok: (response.statusCode ?? 500) >= 200 && (response.statusCode ?? 500) < 300, text: async () => Buffer.concat(chunks).toString('utf8') }));
+    });
+    request.on('timeout', () => request.destroy(new Error('crawl_timeout')));
+    request.on('error', reject);
+    request.end();
+  });
+}
+
+export async function fetchAllowlistedExcerpt(url: URL, fetcher?: typeof fetch): Promise<{ status: 'READY' | 'FAILED'; result: Record<string, unknown> }> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const controller = new AbortController();
     timer = setTimeout(() => controller.abort(), 8_000);
-    const response = await fetcher(url.toString(), {
-      method: 'GET',
-      redirect: 'manual',
-      signal: controller.signal,
-      headers: { 'user-agent': 'SmartPathCatalogBot/1.0' },
-    });
+    const response = fetcher
+      ? await fetcher(url.toString(), { method: 'GET', redirect: 'manual', signal: controller.signal, headers: { 'user-agent': 'SmartPathCatalogBot/1.0' } })
+      : await fetchPinned(url);
     if (response.status >= 300 && response.status < 400) {
       return { status: 'FAILED', result: { error: 'Redirect blocked', statusCode: response.status } };
     }

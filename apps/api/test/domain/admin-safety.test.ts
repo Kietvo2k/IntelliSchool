@@ -29,6 +29,8 @@ describe('admin billing and crawler controls', () => {
     const url = new URL('https://catalog.example.edu.vn/data');
 
     await expect(assertCrawlUrlResolvesToPublic(url, async () => [{ address: '93.184.216.34', family: 4 }, { address: '169.254.169.254', family: 4 }])).rejects.toMatchObject({ code: 'CRAWL_IP_NOT_ALLOWED' });
-    await expect(assertCrawlUrlResolvesToPublic(url, async () => [{ address: '2001:db8::1', family: 6 }])).resolves.toEqual(url);
+    await expect(assertCrawlUrlResolvesToPublic(url, async () => [{ address: '2001:db8::1', family: 6 }])).rejects.toMatchObject({ code: 'CRAWL_IP_NOT_ALLOWED' });
+    await expect(assertCrawlUrlResolvesToPublic(url, async () => [{ address: '2606:4700:4700::1111', family: 6 }])).resolves.toEqual(url);
+    await expect(assertCrawlUrlResolvesToPublic(url, async () => [{ address: '203.0.113.10', family: 4 }])).rejects.toMatchObject({ code: 'CRAWL_IP_NOT_ALLOWED' });
   });
 });
