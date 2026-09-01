@@ -1,4 +1,5 @@
-openapi: 3.0.3
+# Contract hẹp hiện hành cho student records; các contract mới CBT/AI phải được cập nhật cùng Phase 2/3.
+openapi: 3.0.3 
 info:
   title: Smart Path — học bạ số nội bộ
   version: 0.1.0

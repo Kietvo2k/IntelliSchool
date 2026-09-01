@@ -1,4 +1,5 @@
 # Port SCDP + phòng thi CBT — thiết kế
+> **Lịch sử:** ADR và runtime contract IntelliSchool là nguồn quyết định hiện hành.
 
 Ngày: 2026-08-25. Nguồn SCDP chỉ đọc. Kit giấy–xanh Smart Path.
 

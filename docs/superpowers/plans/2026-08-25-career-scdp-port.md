@@ -1,4 +1,5 @@
 # Kế hoạch triển khai port SCDP
+> **Lịch sử:** dùng để đối chiếu port SCDP, không thay thế prompt IntelliSchool.
 
 1. Env LLM + `providerFromModel`.
 2. Từ điển 98 tổ hợp, migration `010`/`011`, seed đủ môn LMS + catalog trường.

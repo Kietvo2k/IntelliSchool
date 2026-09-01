@@ -1,4 +1,5 @@
 # Báo cáo kiểm thử tương tác toàn bộ Smart Path Platform — 2026-08-31
+> **Bằng chứng lịch sử:** không suy ra trạng thái release hiện tại từ báo cáo này. Retest theo `ACCEPTANCE_MATRIX.md`.
 
 ## Kết luận ngắn
 

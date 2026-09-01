@@ -1,4 +1,5 @@
 # Kế hoạch triển khai Phase 3
+> **Lịch sử:** Phase 3 đã được checkpoint; không dùng làm prompt triển khai IntelliSchool.
 
 Triển khai theo lát dọc, theo thứ tự: nền tảng dữ liệu và hợp đồng; identity/platform admin; bài giảng và tài nguyên; ngân hàng câu hỏi/assignment/gradebook; dashboard, báo cáo và export; cuối cùng là kiểm thử end-to-end cùng tài liệu vận hành.
 

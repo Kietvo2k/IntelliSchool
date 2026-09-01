@@ -1,4 +1,5 @@
 # Smart Path — spec nền tảng số trường học
+> **Lịch sử / superseded:** dùng để đối chiếu quyết định cũ. Nguồn hiện hành là `INTELLISCHOOL_PRODUCT_CONTRACT.md` và các ADR.
 
 Cập nhật: 2026-08-28. SCDP/Neko chỉ đọc. Motion vòng đời: F5 skeleton→enter, chuyển trang (sidebar đứng), Back đảo hướng (`PathScrollRestoration` theo pathname, không dùng RR data-router `ScrollRestoration`), lướt whileInView once, refetch SoftRefresh. Chỉ `transform`/`opacity`/`stroke-dashoffset`. `prefers-reduced-motion` cắt chuyển động.
 

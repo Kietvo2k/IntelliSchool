@@ -1,4 +1,5 @@
 # Nghiệm thu web — port SCDP + phòng thi
+> **Lịch sử:** tiêu chí hiện hành ở `docs/quality/ACCEPTANCE_MATRIX.md`.
 
 Cơ sở: `http://127.0.0.1:5176`. Mật khẩu seed: `TestOnlyPassword!2026`. PIN ca thi: `ExamPin2026!`.
 

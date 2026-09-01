@@ -1,4 +1,5 @@
 # Báo cáo release-readiness — Smart Path Platform
+> **Lịch sử / superseded:** release verdict hiện hành chỉ nằm trong `HANDOFF.md` và evidence Phase 4.
 
 Cập nhật lần cuối: 2026-08-30. Phạm vi: working tree hiện tại của `smartclass-platform`; chưa commit, push hoặc deploy.
 

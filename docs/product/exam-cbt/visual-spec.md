@@ -1,4 +1,5 @@
 # Web thi CBT — spec hình ảnh (không improvisation)
+> **Lịch sử / superseded:** asset/layout cũ trước IntelliSchool. Phase UI phải dùng design system mới; Phase backend dùng `EXAM_SECURITY.md` cho integrity.
 
 Thi thử **của trường**, giao diện bám mẫu 4 màn. Không giả pháp nhân Cục QLCL / Bộ GDĐT trên footer.
 
