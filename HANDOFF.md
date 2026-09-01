@@ -51,4 +51,5 @@
 - Test evidence: `npm run verify` fresh PASS; API unit `212/212`; web `59/59`; integration isolated `44/44`; exam integration `7/7`; RLS `2/2`; auth `7/7`; resource `2/2`; export `2/2`; typecheck/lint/build pass.
 - Security evidence: `npm audit --audit-level=high` exit 0, còn 3 advisory moderate transitive qua MinIO; secret scan high-confidence exit 0; `git diff --check` exit 0 ngoài cảnh báo line-ending của file dirty UI.
 - Browser: image/app-test healthy; full E2E `19/28` pass. `9` failure hiện tại chủ yếu do selector strict-mode trùng nav/quick-link trong working tree UI Phase 1 và responsive body hidden; CBT direct Chromium manual pass: session 5 items, không leak key/rubric/ciphertext, signal `GRACE`, restore `ACTIVE`.
+- Manual Chromium proctor: owner unlock trả `200/ACTIVE/unlocked=true`; student đọc lại session trả `200`, `lockedAt=null`, `submittedAt=null`, integrity `ACTIVE`.
 - Release verdict: **DO NOT SHIP**. Chưa có bằng chứng browser đầy đủ cho password-manager popup/proctor UI; provider AI thật và các finding UI còn lại vẫn mở.
