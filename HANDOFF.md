@@ -27,12 +27,10 @@
 
 ## Finding mở chuyển sang Phase tiếp theo
 
-- **F-002**: Profile SQL parameter type mismatch (Phase 2).
-- **F-003**: Duyệt school request tạo invitation nhưng chưa gửi email activation (Phase 2).
-- **F-004**: AI background worker truy vấn cột `u.role` không tồn tại (Phase 2 & Phase 3).
-- **F-005**: CBT strict fullscreen/integrity flow theo contract grace 5s / warning 5–30s / lock 30s / proctor unlock (Phase 2).
-- **F-006 / F-010**: Export polling và download surface trên môi trường browser độc lập (Phase 2).
 - **F-009 / F-015**: AI production provider thật, tool trace, citation và eval gate (Phase 3).
+- **Browser UI regression**: full E2E còn 9 lỗi strict locator/responsive body do working tree UI Phase 1 chưa được làm sạch và commit.
+- **Password-manager popup**: isolated Chromium không có password-manager extension nên chưa có evidence tái tạo trên Chrome profile thật.
+- **Dependency**: `npm audit --audit-level=high` còn 3 advisory moderate transitive qua MinIO; không dùng `audit fix --force` vì sẽ đổi breaking dependency.
 
 ## Thứ tự thực thi
 
