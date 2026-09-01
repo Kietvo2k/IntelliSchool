@@ -44,10 +44,11 @@
 ## Cập nhật Phase 2 backend/security — 2026-09-02
 
 - Nhánh: `revamp/intellischool-2026-09`; không force-push. Phase 1 checkpoint/evidence vẫn giữ nguyên.
-- Commit mới: `76561f3` (spec/plan), `6075ff4` (crypto snapshot), `0a86d36` (migration/keyring/backfill), `cba7ff8` (backend/security), `8fc6cc0` (regression tests).
+- Commit mới: `76561f3` (spec/plan), `6075ff4` (crypto snapshot), `0a86d36` (migration/keyring/backfill), `cba7ff8` (backend/security), `8fc6cc0` (regression tests), `f22d57d` (SSRF DNS pinning), `8df394d` (auth audit/F-002 regression).
 - Snapshot đề thi: AES-256-GCM, AAD + metadata hash, keyring ngoài repo, backfill idempotent, rotation revision và session pinning.
 - CBT: incident state machine server-authoritative, dedupe, grace 5 giây, warning đến 30 giây, lock không auto-submit, restore/close/unlock có audit và authorization.
 - Backend: profile SQL/audit parameter, activation email sau commit, report/resource idempotency, binary download path, SSRF DNS/IP validation, resource audit, session revoke audit/idempotency.
-- Test evidence: unit `212/212`; integration isolated `44/44`; exam integration `7/7`; RLS `2/2`; auth `6/6`; resource `2/2`; export `2/2`; typecheck/lint/build pass.
+- Test evidence: `npm run verify` fresh PASS; API unit `212/212`; web `59/59`; integration isolated `44/44`; exam integration `7/7`; RLS `2/2`; auth `7/7`; resource `2/2`; export `2/2`; typecheck/lint/build pass.
+- Security evidence: `npm audit --audit-level=high` exit 0, còn 3 advisory moderate transitive qua MinIO; secret scan high-confidence exit 0; `git diff --check` exit 0 ngoài cảnh báo line-ending của file dirty UI.
 - Browser: image/app-test healthy; full E2E `19/28` pass. `9` failure hiện tại chủ yếu do selector strict-mode trùng nav/quick-link trong working tree UI Phase 1 và responsive body hidden; CBT direct Chromium manual pass: session 5 items, không leak key/rubric/ciphertext, signal `GRACE`, restore `ACTIVE`.
 - Release verdict: **DO NOT SHIP**. Chưa có bằng chứng browser đầy đủ cho password-manager popup/proctor UI; provider AI thật và các finding UI còn lại vẫn mở.
