@@ -9,10 +9,7 @@ describe('career orchestrator', () => {
     expect(prompt).toContain('Minh An');
   });
 
-  it('returns a clear fallback when no provider is configured', async () => {
-    const result = await analyzeCareerWithAgents(null, { name: 'Minh An' }, ['ACADEMIC_ANALYST']);
-    expect(result.isFallback).toBe(true);
-    expect(result.report).toMatch(/API key|chưa cấu hình/i);
-    expect(result.subAgentResults[0]?.error).toBe('AI_NOT_CONFIGURED');
+  it('fails clearly when no provider is configured instead of returning a fallback report', async () => {
+    await expect(analyzeCareerWithAgents(null, { name: 'Minh An' }, ['ACADEMIC_ANALYST'])).rejects.toThrow('AI_PROVIDER_UNAVAILABLE');
   });
 });

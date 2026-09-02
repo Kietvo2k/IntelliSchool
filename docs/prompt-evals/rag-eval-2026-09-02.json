@@ -1,0 +1,399 @@
+{
+  "aggregate_metrics": {
+    "mean_precision@1": 0.5,
+    "mean_recall@1": 0.375,
+    "mean_ndcg@1": 0.5,
+    "mean_precision@3": 0.25,
+    "mean_recall@3": 0.5,
+    "mean_ndcg@3": 0.5,
+    "mean_precision@5": 0.15000000000000002,
+    "mean_recall@5": 0.5,
+    "mean_ndcg@5": 0.5,
+    "mean_reciprocal_rank": 0.5
+  },
+  "query_results": [
+    {
+      "query_id": "R01",
+      "query": "AI runtime provider configured reachable citations requestId",
+      "relevant_count": 2,
+      "retrieved_count": 5,
+      "metrics": {
+        "precision@1": 0.0,
+        "recall@1": 0.0,
+        "precision@3": 0.0,
+        "recall@3": 0.0,
+        "precision@5": 0.0,
+        "recall@5": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg@1": 0.0,
+        "ndcg@3": 0.0,
+        "ndcg@5": 0.0
+      },
+      "retrieved_docs": [
+        [
+          "SKILL_SYNC_MANIFEST",
+          1.0
+        ],
+        [
+          "ADR-001-intellischool-rebrand",
+          1.0
+        ],
+        [
+          "INTELLISCHOOL_DESIGN_SYSTEM",
+          1.0
+        ],
+        [
+          "INTELLISCHOOL_PRODUCT_CONTRACT",
+          1.0
+        ],
+        [
+          "school-platform-spec",
+          1.0
+        ]
+      ],
+      "relevant_docs": [
+        "ADR-003-real-ai-runtime",
+        "RUNTIME_CONTRACT"
+      ]
+    },
+    {
+      "query_id": "R02",
+      "query": "CBT grace lock proctor unlock",
+      "relevant_count": 1,
+      "retrieved_count": 5,
+      "metrics": {
+        "precision@1": 1.0,
+        "recall@1": 1.0,
+        "precision@3": 0.3333333333333333,
+        "recall@3": 1.0,
+        "precision@5": 0.2,
+        "recall@5": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg@1": 1.0,
+        "ndcg@3": 1.0,
+        "ndcg@5": 1.0
+      },
+      "retrieved_docs": [
+        [
+          "ACCEPTANCE_MATRIX",
+          1.0000000000000002
+        ],
+        [
+          "INDEX",
+          1.0
+        ],
+        [
+          "INTELLISCHOOL_DESIGN_SYSTEM",
+          1.0
+        ],
+        [
+          "school-platform-spec",
+          1.0
+        ],
+        [
+          "visual-spec",
+          1.0
+        ]
+      ],
+      "relevant_docs": [
+        "ACCEPTANCE_MATRIX"
+      ]
+    },
+    {
+      "query_id": "R03",
+      "query": "release gate provider integration DO NOT SHIP",
+      "relevant_count": 2,
+      "retrieved_count": 5,
+      "metrics": {
+        "precision@1": 0.0,
+        "recall@1": 0.0,
+        "precision@3": 0.0,
+        "recall@3": 0.0,
+        "precision@5": 0.0,
+        "recall@5": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg@1": 0.0,
+        "ndcg@3": 0.0,
+        "ndcg@5": 0.0
+      },
+      "retrieved_docs": [
+        [
+          "ADR-001-intellischool-rebrand",
+          1.0000000000000002
+        ],
+        [
+          "baseline-v0-and-r1",
+          1.0000000000000002
+        ],
+        [
+          "INDEX",
+          1.0
+        ],
+        [
+          "OVERVIEW",
+          1.0
+        ],
+        [
+          "INTELLISCHOOL_PRODUCT_CONTRACT",
+          1.0
+        ]
+      ],
+      "relevant_docs": [
+        "ACCEPTANCE_MATRIX",
+        "RUNTIME_CONTRACT"
+      ]
+    },
+    {
+      "query_id": "R04",
+      "query": "tenant RLS school_id permissions",
+      "relevant_count": 2,
+      "retrieved_count": 5,
+      "metrics": {
+        "precision@1": 1.0,
+        "recall@1": 0.5,
+        "precision@3": 0.6666666666666666,
+        "recall@3": 1.0,
+        "precision@5": 0.4,
+        "recall@5": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg@1": 1.0,
+        "ndcg@3": 1.0,
+        "ndcg@5": 1.0
+      },
+      "retrieved_docs": [
+        [
+          "ACCEPTANCE_MATRIX",
+          1.0000000000000002
+        ],
+        [
+          "RUNTIME_CONTRACT",
+          1.0
+        ],
+        [
+          "ADR-001-intellischool-rebrand",
+          1.0
+        ],
+        [
+          "ADR-002-exam-security-and-integrity",
+          1.0
+        ],
+        [
+          "ADR-003-real-ai-runtime",
+          1.0
+        ]
+      ],
+      "relevant_docs": [
+        "ACCEPTANCE_MATRIX",
+        "RUNTIME_CONTRACT"
+      ]
+    }
+  ],
+  "failure_analysis": {
+    "poor_precision_count": 2,
+    "poor_recall_count": 2,
+    "zero_results_count": 0,
+    "poor_precision_examples": [
+      {
+        "query_id": "R01",
+        "query": "AI runtime provider configured reachable citations requestId",
+        "relevant_count": 2,
+        "retrieved_count": 5,
+        "metrics": {
+          "precision@1": 0.0,
+          "recall@1": 0.0,
+          "precision@3": 0.0,
+          "recall@3": 0.0,
+          "precision@5": 0.0,
+          "recall@5": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg@1": 0.0,
+          "ndcg@3": 0.0,
+          "ndcg@5": 0.0
+        },
+        "retrieved_docs": [
+          [
+            "SKILL_SYNC_MANIFEST",
+            1.0
+          ],
+          [
+            "ADR-001-intellischool-rebrand",
+            1.0
+          ],
+          [
+            "INTELLISCHOOL_DESIGN_SYSTEM",
+            1.0
+          ],
+          [
+            "INTELLISCHOOL_PRODUCT_CONTRACT",
+            1.0
+          ],
+          [
+            "school-platform-spec",
+            1.0
+          ]
+        ],
+        "relevant_docs": [
+          "ADR-003-real-ai-runtime",
+          "RUNTIME_CONTRACT"
+        ]
+      },
+      {
+        "query_id": "R03",
+        "query": "release gate provider integration DO NOT SHIP",
+        "relevant_count": 2,
+        "retrieved_count": 5,
+        "metrics": {
+          "precision@1": 0.0,
+          "recall@1": 0.0,
+          "precision@3": 0.0,
+          "recall@3": 0.0,
+          "precision@5": 0.0,
+          "recall@5": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg@1": 0.0,
+          "ndcg@3": 0.0,
+          "ndcg@5": 0.0
+        },
+        "retrieved_docs": [
+          [
+            "ADR-001-intellischool-rebrand",
+            1.0000000000000002
+          ],
+          [
+            "baseline-v0-and-r1",
+            1.0000000000000002
+          ],
+          [
+            "INDEX",
+            1.0
+          ],
+          [
+            "OVERVIEW",
+            1.0
+          ],
+          [
+            "INTELLISCHOOL_PRODUCT_CONTRACT",
+            1.0
+          ]
+        ],
+        "relevant_docs": [
+          "ACCEPTANCE_MATRIX",
+          "RUNTIME_CONTRACT"
+        ]
+      }
+    ],
+    "poor_recall_examples": [
+      {
+        "query_id": "R01",
+        "query": "AI runtime provider configured reachable citations requestId",
+        "relevant_count": 2,
+        "retrieved_count": 5,
+        "metrics": {
+          "precision@1": 0.0,
+          "recall@1": 0.0,
+          "precision@3": 0.0,
+          "recall@3": 0.0,
+          "precision@5": 0.0,
+          "recall@5": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg@1": 0.0,
+          "ndcg@3": 0.0,
+          "ndcg@5": 0.0
+        },
+        "retrieved_docs": [
+          [
+            "SKILL_SYNC_MANIFEST",
+            1.0
+          ],
+          [
+            "ADR-001-intellischool-rebrand",
+            1.0
+          ],
+          [
+            "INTELLISCHOOL_DESIGN_SYSTEM",
+            1.0
+          ],
+          [
+            "INTELLISCHOOL_PRODUCT_CONTRACT",
+            1.0
+          ],
+          [
+            "school-platform-spec",
+            1.0
+          ]
+        ],
+        "relevant_docs": [
+          "ADR-003-real-ai-runtime",
+          "RUNTIME_CONTRACT"
+        ]
+      },
+      {
+        "query_id": "R03",
+        "query": "release gate provider integration DO NOT SHIP",
+        "relevant_count": 2,
+        "retrieved_count": 5,
+        "metrics": {
+          "precision@1": 0.0,
+          "recall@1": 0.0,
+          "precision@3": 0.0,
+          "recall@3": 0.0,
+          "precision@5": 0.0,
+          "recall@5": 0.0,
+          "reciprocal_rank": 0.0,
+          "ndcg@1": 0.0,
+          "ndcg@3": 0.0,
+          "ndcg@5": 0.0
+        },
+        "retrieved_docs": [
+          [
+            "ADR-001-intellischool-rebrand",
+            1.0000000000000002
+          ],
+          [
+            "baseline-v0-and-r1",
+            1.0000000000000002
+          ],
+          [
+            "INDEX",
+            1.0
+          ],
+          [
+            "OVERVIEW",
+            1.0
+          ],
+          [
+            "INTELLISCHOOL_PRODUCT_CONTRACT",
+            1.0
+          ]
+        ],
+        "relevant_docs": [
+          "ACCEPTANCE_MATRIX",
+          "RUNTIME_CONTRACT"
+        ]
+      }
+    ],
+    "query_length_analysis": {
+      "short_queries": {
+        "count": 0,
+        "avg_precision@5": 0.0
+      },
+      "medium_queries": {
+        "count": 4,
+        "avg_precision@5": 0.15000000000000002
+      },
+      "long_queries": {
+        "count": 0,
+        "avg_precision@5": 0.0
+      }
+    },
+    "common_failure_patterns": [
+      "Vocabulary mismatch: 2 queries may have vocabulary mismatch issues",
+      "Low recall: 4 queries have recall@10 < 0.5 (missing relevant documents)"
+    ]
+  },
+  "evaluation_summary": "Evaluation Summary (4 queries):\n==================================================\nPrecision@1:  0.500 (50.0%)\nPrecision@5:  0.150 (15.0%)\nRecall@5:     0.500 (50.0%)\nMRR:          0.500\nNDCG@5:       0.500\n\nPerformance Assessment:\n\u25cb Good precision - many queries return relevant results first\n\u2717 Poor recall - missing many relevant documents\n",
+  "recommendations": [
+    "RANKING ISSUES: Current ranking may not prioritize relevant documents. Consider BM25 or learning-to-rank models.",
+    "SHORT QUERY ISSUES: Brief queries perform poorly. Consider query completion or suggestion features."
+  ]
+}

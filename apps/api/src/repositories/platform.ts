@@ -450,7 +450,7 @@ export interface PlatformRepository {
   adminImportAdmissionScores(actor: AuthContext, input: ImportAdmissionScoresInput, idempotencyKey: string): Promise<unknown>;
   adminUpsertScholarship(actor: AuthContext, input: UpsertScholarshipInput, idempotencyKey: string): Promise<unknown>;
   getAptitudeQuestions(actor: AuthContext): Promise<unknown>;
-  saveAptitudeAssessment(actor: AuthContext, answers: Record<string, number | string>, idempotencyKey: string): Promise<unknown>;
+  saveAptitudeAssessment(actor: AuthContext, answers: Record<string, number | string>, idempotencyKey: string, requestId?: string): Promise<unknown>;
   getCareerProfile(actor: AuthContext): Promise<unknown>;
   updateCareerProfile(actor: AuthContext, input: UpdateCareerProfileInput, idempotencyKey: string): Promise<unknown>;
   setCareerShareGrant(actor: AuthContext, input: SetShareGrantInput, idempotencyKey: string): Promise<unknown>;
@@ -473,13 +473,14 @@ export interface PlatformRepository {
   listAiModels(actor: AuthContext): Promise<unknown>;
   upsertAiModel(actor: AuthContext, input: UpsertAiModelInput, idempotencyKey: string): Promise<unknown>;
   getAiUsageSummary(actor: AuthContext): Promise<unknown>;
-  aiHealthCheck(actor: AuthContext): Promise<unknown>;
+  aiHealthCheck(actor: AuthContext, requestId?: string): Promise<unknown>;
   ingestRagContent(actor: AuthContext, input: IngestRagInput, idempotencyKey: string): Promise<unknown>;
   listRagDocuments(actor: AuthContext): Promise<unknown>;
   deleteRagDocument(actor: AuthContext, documentId: string, idempotencyKey: string): Promise<unknown>;
   searchRag(actor: AuthContext, input: SearchRagInput): Promise<unknown>;
-  chatWithAi(actor: AuthContext, input: AiChatInput, idempotencyKey: string): Promise<unknown>;
-  createAiJob(actor: AuthContext, input: AiChatInput, idempotencyKey: string): Promise<unknown>;
+  chatWithAi(actor: AuthContext, input: AiChatInput, idempotencyKey: string, requestId?: string, signal?: AbortSignal, jobId?: string): Promise<unknown>;
+  createAiJob(actor: AuthContext, input: AiChatInput, idempotencyKey: string, requestId?: string): Promise<unknown>;
+  cancelAiJob(actor: AuthContext, jobId: string, idempotencyKey: string, requestId?: string): Promise<unknown>;
   listAiJobs(actor: AuthContext): Promise<unknown>;
   getAiJob(actor: AuthContext, jobId: string): Promise<unknown>;
   listAiSessions(actor: AuthContext): Promise<unknown>;
@@ -496,7 +497,7 @@ export interface PlatformRepository {
   listExamRecords(actor: AuthContext): Promise<unknown>;
   upsertExamRecords(actor: AuthContext, records: ExamRecordInput[], idempotencyKey: string): Promise<unknown>;
   rankSchools(actor: AuthContext, input: RankSchoolsInput): Promise<unknown>;
-  analyzeCareer(actor: AuthContext, input: CareerAnalyzeInput, idempotencyKey: string): Promise<unknown>;
+  analyzeCareer(actor: AuthContext, input: CareerAnalyzeInput, idempotencyKey: string, requestId?: string): Promise<unknown>;
   listCareerAnalysisRuns(actor: AuthContext): Promise<unknown>;
   listCareerAgents(actor: AuthContext): Promise<unknown>;
   listOpenExams(actor: AuthContext): Promise<unknown>;

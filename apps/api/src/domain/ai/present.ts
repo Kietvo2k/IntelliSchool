@@ -30,17 +30,3 @@ export function presentAssistantText(purpose: string | undefined, raw: string): 
 
   return trimmed.replace(/```json[\s\S]*?```/gi, '').trim() || 'Đã ghi nhận.';
 }
-
-export function parseJsonObject(text: string): Record<string, unknown> | null {
-  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-  try {
-    return JSON.parse(cleaned) as Record<string, unknown>;
-  } catch {
-    const start = cleaned.indexOf('{');
-    const end = cleaned.lastIndexOf('}');
-    if (start >= 0 && end > start) {
-      try { return JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>; } catch { return null; }
-    }
-    return null;
-  }
-}

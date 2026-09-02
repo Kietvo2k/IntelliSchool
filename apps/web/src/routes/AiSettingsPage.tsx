@@ -7,13 +7,14 @@ import { createIdempotentAction } from '../lib/idempotent-action.js';
 
 interface AiModel { id: string; provider: string; modelName: string; tier: string; isEnabled: boolean; monthlyCostLimitVnd: number | null; inputVndPer1k: number; outputVndPer1k: number; }
 interface UsageSummary { monthCostVnd: number; monthRequests: number; monthlyCostLimitVnd: number | null; }
+interface ProviderHealth { configured: boolean; reachable: boolean; provider: string | null; model: string | null; capabilities: { chat: boolean; embeddings: boolean; structuredOutput: boolean }; checkedAt: string; reason?: string; requestId: string; }
 
 export function AiSettingsPage() {
   const { user } = useSession();
   const isOwner = user.role === 'SCHOOL_OWNER';
   const [models, setModels] = useState<AiModel[]>([]);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
-  const [health, setHealth] = useState<string>('');
+  const [health, setHealth] = useState<ProviderHealth | null>(null);
   const [message, setMessage] = useState('');
   const [state, setState] = useState<'idle' | 'sending' | 'error'>('idle');
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -72,12 +73,11 @@ export function AiSettingsPage() {
   }
 
   async function checkHealth() {
-    setHealth('Đang kiểm tra…');
+    setHealth(null);
     try {
-      const result = await apiRequest<{ ok: boolean; model?: string; latencyMs?: number; reason?: string }>('/api/v1/ai/health');
-      setHealth(result.ok ? `Hoạt động (${result.model}, ${result.latencyMs}ms)` : `Chưa sẵn sàng: ${result.reason}`);
+      setHealth(await apiRequest<ProviderHealth>('/api/v1/ai/health'));
     } catch (error) {
-      setHealth(error instanceof ApiRequestError ? error.message : 'Không kiểm tra được.');
+      setMessage(error instanceof ApiRequestError ? error.message : 'Không kiểm tra được.');
     }
   }
 
@@ -138,7 +138,12 @@ export function AiSettingsPage() {
             )}
             <div className="flex items-center gap-3">
               <button type="button" className="button button-quiet" onClick={() => void checkHealth()}>Kiểm tra kết nối AI</button>
-              {health && <p role="status" className="font-bold text-[var(--green)] m-0">{health}</p>}
+              {health && (
+                <div role="status" className={`text-xs font-bold ${health.reachable ? 'text-[var(--green)]' : 'text-amber-700'}`}>
+                  <p className="m-0">{health.reachable ? 'Reachable' : 'Unavailable'} · {health.provider ?? 'chưa cấu hình'} · {health.model ?? 'chưa có model'}</p>
+                  <small>{health.configured ? 'configured' : 'not configured'} · chat {health.capabilities.chat ? '✓' : '—'} · embeddings {health.capabilities.embeddings ? '✓' : '—'} · structured {health.capabilities.structuredOutput ? '✓' : '—'} · checked {new Date(health.checkedAt).toLocaleTimeString('vi-VN')}</small>
+                </div>
+              )}
             </div>
             <div className="wizard-footer">
               <div />

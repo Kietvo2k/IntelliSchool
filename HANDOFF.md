@@ -51,3 +51,32 @@
 - Browser: image/app-test healthy; full E2E `19/28` pass. `9` failure hiện tại chủ yếu do selector strict-mode trùng nav/quick-link trong working tree UI Phase 1 và responsive body hidden; CBT direct Chromium manual pass: session 5 items, không leak key/rubric/ciphertext, signal `GRACE`, restore `ACTIVE`.
 - Manual Chromium proctor: owner unlock trả `200/ACTIVE/unlocked=true`; student đọc lại session trả `200`, `lockedAt=null`, `submittedAt=null`, integrity `ACTIVE`.
 - Release verdict: **DO NOT SHIP**. Chưa có bằng chứng browser đầy đủ cho password-manager popup/proctor UI; provider AI thật và các finding UI còn lại vẫn mở.
+
+## Cập nhật AI production runtime — 2026-09-02
+
+- Nhánh: `revamp/intellischool-2026-09`; Phase 2 checkpoint/evidence được giữ nguyên;
+  không force-push. Các thay đổi UI khác có sẵn trong working tree không thuộc commit này.
+- OpenAI-compatible là đường chạy chính. Key/base URL/model chỉ server-side; endpoint
+  DB phải trùng HTTPS allowlist, DNS private/reserved bị chặn và redirect bị từ chối.
+  Không còn model fallback, canned, `composeFallback` hoặc extractive fallback trên
+  production path; thiếu/lỗi provider trả `503 AI_UNAVAILABLE` rõ ràng.
+- Reply AI chuẩn hóa có `provider`, `usedModel`, `executionMode`, `usage`, `citations`,
+  `requestId`; Thinking có thêm `jobId`. Provider status trả configured/reachable/
+  capabilities/model/checkedAt mà không lộ secret.
+- Teacher compose, career analysis, aptitude essay và interview dùng Zod validation;
+  malformed output retry bounded cùng provider rồi fail `AI_OUTPUT_INVALID`.
+  RAG lọc tenant/membership class trước retrieval và đánh dấu context untrusted.
+- `ai_jobs` có `request_id`, atomic claim, max-attempt retry, stale reclaim, cancel
+  server-authoritative và không ghi đè job đã hủy; migration mới là `026_ai_request_evidence.sql`.
+- Eval/evidence: 18 case `AI01–AI18`, prompt analyzer 650/95/90 PASS; live provider
+  smoke 2/2; live grounded chat, teacher compose, career+aptitude và Thinking đều đã
+  pass khi chạy từng capability tuần tự; browser AI journey app-test 2/2.
+  Chi tiết: `docs/prompt-evals/ai-runtime-evidence-2026-09-02.md` và các JSON evidence.
+- Verification mới: `npm run verify` PASS (API 226, web 59, lint/typecheck/build);
+  integration isolated PASS 47/47; `npm audit --audit-level=high` exit 0 còn 3
+  moderate transitive MinIO, không chạy force fix; high-confidence secret scan không có match.
+- Finding mở: RAG helper benchmark hiện precision@5 0.150/recall@5 0.500 dưới floor
+  tham chiếu; static threat scan vẫn báo critical trên prompt adversarial có chủ ý;
+  full live batch có transient rate-limit nên release script tách từng capability process.
+- Commit hash: xem hash commit hiện tại trong `git log -1 --format=%H`; giá trị được
+  ghi nhận trong bàn giao sau commit để tránh tự tham chiếu hash của chính commit.

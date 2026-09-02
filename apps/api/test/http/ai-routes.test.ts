@@ -10,7 +10,7 @@ function buildStub(calls: string[]) {
     listAiModels: async () => [{ id: 'm1', provider: 'openai', modelName: 'gpt', tier: 'CLOUD', isEnabled: true, monthlyCostLimitVnd: 500000, inputVndPer1k: 20, outputVndPer1k: 60 }],
     upsertAiModel: async (_actor: unknown, input: { modelName: string }, key: string) => { calls.push(`ai-model:${key}`); return { id: 'm1', modelName: input.modelName }; },
     getAiUsageSummary: async () => ({ monthCostVnd: 12000, monthRequests: 8, monthlyCostLimitVnd: 500000 }),
-    aiHealthCheck: async () => ({ ok: false, reason: 'NO_MODEL_CONFIGURED' }),
+    aiHealthCheck: async () => ({ configured: false, reachable: false, capabilities: { chat: false, embeddings: false, structuredOutput: false }, provider: null, model: null, checkedAt: '2026-09-02T00:00:00.000Z', requestId: 'request-1', reason: 'NO_MODEL_CONFIGURED' }),
   };
 }
 
@@ -43,5 +43,14 @@ describe('AI provider config API surface', () => {
     const studentList = await studentApp.inject({ method: 'GET', url: '/api/v1/ai/models', headers: { cookie: 'smartpath_session=test' } });
     expect(studentList.statusCode).toBe(403);
     await studentApp.close();
+  });
+
+  it('exposes provider health without secrets', async () => {
+    const { app } = buildTestApp(owner);
+    const response = await app.inject({ method: 'GET', url: '/api/v1/ai/health', headers: { cookie: 'smartpath_session=test' } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({ configured: false, reachable: false, capabilities: { chat: false, embeddings: false, structuredOutput: false }, requestId: 'request-1' });
+    expect(JSON.stringify(response.json())).not.toMatch(/api[_-]?key|secret/i);
+    await app.close();
   });
 });

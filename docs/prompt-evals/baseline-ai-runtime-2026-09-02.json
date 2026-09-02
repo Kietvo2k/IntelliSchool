@@ -1,0 +1,47 @@
+{
+  "token_count": 650,
+  "estimated_cost": null,
+  "model": "default",
+  "clarity_score": 95,
+  "structure_score": 90,
+  "issues": [],
+  "suggestions": [
+    "Consider adding 2-3 few-shot examples for consistent outputs",
+    "Consider adding role context: \"You are an expert...\""
+  ],
+  "sections": [
+    {
+      "name": "Introduction",
+      "lines": "1-5"
+    },
+    {
+      "name": "\u0110\u1ecdc b\u1eaft bu\u1ed9c",
+      "lines": "6-12"
+    },
+    {
+      "name": "Skill v\u00e0 branch gate",
+      "lines": "13-20"
+    },
+    {
+      "name": "Ph\u1ea1m vi",
+      "lines": "21-36"
+    },
+    {
+      "name": "Gate AI th\u1eadt",
+      "lines": "37-45"
+    },
+    {
+      "name": "B\u00e0n giao",
+      "lines": "46-50"
+    },
+    {
+      "name": "Output Format (b\u1eaft bu\u1ed9c)",
+      "lines": "51-56"
+    }
+  ],
+  "has_examples": false,
+  "example_count": 0,
+  "has_output_format": true,
+  "word_count": 347,
+  "line_count": 56
+}

@@ -38,6 +38,8 @@ export interface RagChunkScope {
   subjectId: string | null;
 }
 
-export function filterRagChunks<T extends RagChunkScope>(chunks: readonly T[], scope: { schoolId: string; classId: string; subjectId: string }): T[] {
-  return chunks.filter((chunk) => chunk.schoolId === scope.schoolId && chunk.classId === scope.classId && chunk.subjectId === scope.subjectId);
+export function filterRagChunks<T extends RagChunkScope>(chunks: readonly T[], scope: { schoolId: string; classIds: readonly string[]; subjectId: string }): T[] {
+  return chunks.filter((chunk) => chunk.schoolId === scope.schoolId
+    && (chunk.classId === null || scope.classIds.includes(chunk.classId))
+    && (chunk.subjectId === null || chunk.subjectId === scope.subjectId));
 }

@@ -16,6 +16,7 @@ function buildStub(calls: string[]) {
     chatWithAi: async (_actor: unknown, input: { message: string; reasoningMode?: string; agentic?: boolean; sourceMode?: string }, key: string) => { calls.push(`chat:${key}`); return { sessionId: 's1', mode: 'GROUNDED', usedModel: null, reasoningMode: input.reasoningMode, agentic: input.agentic, sourceMode: input.sourceMode, message: { id: 'm2', role: 'ASSISTANT', content: `echo:${input.message}`, citations: [], createdAt: '2026-01-01T00:00:00.000Z' } }; },
     createAiJob: async (_actor: unknown, input: { message: string }, key: string) => { calls.push(`job:${key}`); return { jobId: '44444444-4444-4444-8444-444444444444', status: 'QUEUED', stage: 'QUEUED', progress: 0, input: input.message }; },
     getAiJob: async () => ({ jobId: '44444444-4444-4444-8444-444444444444', status: 'COMPLETED', stage: 'COMPLETED', progress: 100, result: { message: { content: 'x' } } }),
+    cancelAiJob: async (_actor: unknown, jobId: string, _key: string) => ({ jobId, status: 'CANCELLED', stage: 'CANCELLED', progress: 100, requestId: 'request-1' }),
   };
 }
 
@@ -77,6 +78,14 @@ describe('RAG + AI chat API surface', () => {
     const status = await app.inject({ method: 'GET', url: '/api/v1/ai/jobs/44444444-4444-4444-8444-444444444444', headers: { cookie: 'smartpath_session=test' } });
     expect(status.statusCode).toBe(200);
     expect(status.json().data).toMatchObject({ status: 'COMPLETED', progress: 100 });
+    await app.close();
+  });
+
+  it('cancels a Thinking job through a server-authoritative endpoint', async () => {
+    const { app } = buildTestApp(student);
+    const response = await app.inject({ method: 'POST', url: '/api/v1/ai/jobs/44444444-4444-4444-8444-444444444444/cancel', headers: { cookie: 'smartpath_session=test', origin: 'http://127.0.0.1:5176', 'x-idempotency-key': 'ai-job-cancel-1' } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({ status: 'CANCELLED', progress: 100, requestId: 'request-1' });
     await app.close();
   });
 });

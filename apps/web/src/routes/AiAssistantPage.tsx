@@ -11,7 +11,11 @@ interface Citation { documentId: string; documentTitle: string; chunkId: string;
 interface ChatReply {
   sessionId: string;
   mode: 'GROUNDED' | 'GENERAL' | 'REFUSED';
+  executionMode: 'MODEL' | 'UNAVAILABLE';
+  provider: string | null;
   usedModel: string | null;
+  requestId: string;
+  usage: { inputTokens: number; outputTokens: number; estimatedCostVnd: number };
   notice?: string;
   overflow?: boolean;
   tokenCount?: number;
@@ -54,6 +58,7 @@ export function AiAssistantPage() {
   const [sourceMode, setSourceMode] = useState<ChatSourceMode>('AUTO');
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [toolRuns, setToolRuns] = useState<ChatReply['toolRuns']>([]);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   async function loadSessions() {
     const rows = await apiRequest<Array<{ id: string; title?: string; lastAt?: string | null; createdAt: string; status?: string; tokenCount?: number }>>('/api/v1/ai/sessions').catch(() => []);
@@ -72,6 +77,7 @@ export function AiAssistantPage() {
       const jobs = await apiRequest<Array<{ jobId: string; status: string; stage: string; progress: number }>>('/api/v1/ai/jobs').catch(() => []);
       const active = jobs[0];
       if (!active) return;
+      setActiveJobId(active.jobId);
       setNotice(`Thinking đang tiếp tục · ${active.stage} · ${active.progress}%`);
       timer = window.setInterval(async () => {
         const job = await apiRequest<{ status: string; stage: string; progress: number }>(`/api/v1/ai/jobs/${active.jobId}`).catch(() => null);
@@ -79,6 +85,7 @@ export function AiAssistantPage() {
         setNotice(`Thinking · ${job.stage} · ${job.progress}%`);
         if (job.status === 'COMPLETED' || job.status === 'FAILED' || job.status === 'CANCELLED') {
           if (timer !== undefined) window.clearInterval(timer);
+          setActiveJobId(null);
           await loadSessions();
           if (job.status === 'COMPLETED') setNotice('Thinking đã hoàn tất. Hãy mở phiên trò chuyện để xem kết quả.');
         }
@@ -146,6 +153,7 @@ export function AiAssistantPage() {
       let reply: ChatReply | null = null;
       if (reasoningMode === 'THINKING') {
         const queued = await apiRequest<{ jobId: string }>('/api/v1/ai/jobs', { method: 'POST', idempotencyKey: newIdempotencyKey('ai-job'), body: requestBody });
+        setActiveJobId(queued.jobId);
         try { sessionStorage.setItem('smartpath-active-ai-job', queued.jobId); } catch { /* private mode */ }
         setNotice('Thinking đang xếp hàng · hệ thống sẽ cập nhật tiến độ thật, tối đa 5 phút.');
         for (let attempt = 0; attempt < 300; attempt += 1) {
@@ -157,6 +165,7 @@ export function AiAssistantPage() {
         }
         if (!reply) throw new Error('AI job quá thời gian chờ 5 phút. Em có thể gửi lại với chế độ Tiêu chuẩn.');
         try { sessionStorage.removeItem('smartpath-active-ai-job'); } catch { /* private mode */ }
+        setActiveJobId(null);
       } else {
         reply = await apiRequest<ChatReply>('/api/v1/ai/chat', { method: 'POST', idempotencyKey: newIdempotencyKey('ai-chat'), body: requestBody });
       }
@@ -170,12 +179,26 @@ export function AiAssistantPage() {
         content: presentAssistantText(learner ? 'PERSONAL_STUDY' : 'ASSISTANT', reply.message.content),
         citations: reply.message.citations,
       }]);
-      setNotice([MODE_LABEL[reply.mode], reply.usedModel ? `Model: ${reply.usedModel}` : null, reply.notice, reply.overflow ? 'Đã mở phiên mới vì đầy ngữ cảnh.' : null].filter(Boolean).join(' · '));
+      const evidence = reply.executionMode === 'MODEL'
+        ? [`Provider: ${reply.provider ?? 'unknown'}`, `Model: ${reply.usedModel ?? 'unknown'}`, `Token: ${reply.usage.inputTokens + reply.usage.outputTokens}`, `Request: ${reply.requestId}`]
+        : ['AI chưa khả dụng'];
+      setNotice([MODE_LABEL[reply.mode], ...evidence, reply.notice, reply.overflow ? 'Đã mở phiên mới vì đầy ngữ cảnh.' : null].filter(Boolean).join(' · '));
       await loadSessions();
     } catch (error) {
       setNotice(error instanceof ApiRequestError ? error.message : 'Chưa gửi được câu hỏi.');
     } finally {
+      setActiveJobId(null);
       setSending(false);
+    }
+  }
+
+  async function cancelThinking() {
+    if (!activeJobId) return;
+    try {
+      await apiRequest(`/api/v1/ai/jobs/${activeJobId}/cancel`, { method: 'POST', idempotencyKey: newIdempotencyKey('ai-job-cancel') });
+      setNotice('Thinking đã được hủy trên máy chủ.');
+    } catch (error) {
+      setNotice(error instanceof ApiRequestError ? error.message : 'Chưa hủy được Thinking.');
     }
   }
 
@@ -236,6 +259,7 @@ export function AiAssistantPage() {
             ))}
           </div>
         ) : null}
+        footerNote={activeJobId ? <button type="button" className="button button-quiet text-xs" onClick={() => void cancelThinking()}>Hủy Thinking</button> : undefined}
         reasoningMode={reasoningMode}
         agentic={agentic}
         sourceMode={sourceMode}

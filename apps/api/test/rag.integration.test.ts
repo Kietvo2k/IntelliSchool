@@ -28,7 +28,7 @@ describe('RAG ingestion + AI chat', () => {
   });
   afterAll(async () => { await Promise.all([controlPool.end(), apiPool.end()]); });
 
-  it('ingests text, retrieves relevant chunks and answers with citations (local fallback)', async () => {
+  it('ingests text and retrieves relevant chunks without synthesizing a fake answer', async () => {
     const repository = new PostgresPlatformRepository({ apiPool, controlPool });
     const ingested = await repository.ingestRagContent(teacher, {
       sourceKind: 'TEXT',
@@ -42,9 +42,7 @@ describe('RAG ingestion + AI chat', () => {
     const search = await repository.searchRag(student, { query: 'quang hợp là gì' }) as { citations: Array<{ documentTitle: string }> };
     expect(search.citations.length).toBeGreaterThan(0);
 
-    const reply = await repository.chatWithAi(student, { message: 'Giải thích ngắn gọn quang hợp' }, 'rag-chat-int-1') as { mode: string; message: { content: string; citations: unknown[] } };
-    expect(['GROUNDED', 'GENERAL']).toContain(reply.mode);
-    expect(reply.message.content.length).toBeGreaterThan(0);
+    await expect(repository.chatWithAi(student, { message: 'Giải thích ngắn gọn quang hợp' }, 'rag-chat-int-1')).rejects.toMatchObject({ statusCode: 503, code: 'AI_UNAVAILABLE' });
   });
 
   it('refuses to hand over answers for an open assignment', async () => {
@@ -78,10 +76,10 @@ describe('RAG ingestion + AI chat', () => {
       status = await repository.getAiJob(student, queued.jobId) as typeof status;
       if (status.status === 'COMPLETED' || status.status === 'FAILED') break;
     }
-    expect(status?.status).toBe('COMPLETED');
+    expect(status?.status).toBe('FAILED');
     expect(status?.progress).toBe(100);
-    expect(status?.result?.message?.content).toBeTruthy();
-    expect(status?.isFallback).toBe(true);
+    expect(status?.result).toBeNull();
+    expect(status?.isFallback).toBe(false);
     expect(status?.usage).toEqual(expect.objectContaining({ inputTokens: expect.any(Number), outputTokens: expect.any(Number), estimatedCostVnd: expect.any(Number) }));
     expect(status?.toolTrace).toEqual(expect.any(Array));
     const stored = await controlPool.query<{
@@ -95,11 +93,30 @@ describe('RAG ingestion + AI chat', () => {
       tool_trace: unknown;
     }>('SELECT provider, requested_model, used_model, is_fallback, input_tokens, output_tokens, estimated_cost_vnd::text, tool_trace FROM ai_jobs WHERE id = $1', [queued.jobId]);
     expect(stored.rows[0]).toEqual(expect.objectContaining({
-      is_fallback: true,
+      is_fallback: false,
       input_tokens: expect.any(Number),
       output_tokens: expect.any(Number),
       estimated_cost_vnd: expect.any(String),
       tool_trace: expect.any(Array),
     }));
+  });
+
+  it('cancels a queued Thinking job atomically and preserves the request correlation id', async () => {
+    const inserted = await controlPool.query<{ id: string }>(`INSERT INTO ai_jobs (school_id, user_id, input, request_id, deadline_at)
+      VALUES ($1, $2, '{"message":"cancel me","reasoningMode":"THINKING"}'::jsonb, '22222222-2222-4222-8222-222222222222', now() + interval '5 minutes') RETURNING id`, [student.schoolId, student.userId]);
+    const repository = new PostgresPlatformRepository({ apiPool, controlPool });
+    const result = await repository.cancelAiJob(student, inserted.rows[0]!.id, 'rag-ai-job-cancel-1', '33333333-3333-4333-8333-333333333333') as { status: string; progress: number; requestId: string };
+    expect(result).toEqual({ jobId: inserted.rows[0]!.id, status: 'CANCELLED', stage: 'CANCELLED', progress: 100, requestId: '33333333-3333-4333-8333-333333333333' });
+    const stored = await controlPool.query<{ status: string; request_id: string }>('SELECT status, request_id FROM ai_jobs WHERE id = $1', [inserted.rows[0]!.id]);
+    expect(stored.rows[0]).toEqual({ status: 'CANCELLED', request_id: '22222222-2222-4222-8222-222222222222' });
+  });
+
+  it('reclaims a stale job through the real membership role and terminates it when attempts are exhausted', async () => {
+    const inserted = await controlPool.query<{ id: string }>(`INSERT INTO ai_jobs (school_id, user_id, input, status, stage, progress, attempt_count, max_attempts, next_attempt_at, lease_expires_at, deadline_at, request_id)
+      VALUES ($1, $2, '{"message":"stale job","reasoningMode":"THINKING"}'::jsonb, 'RUNNING', 'REASONING', 0, 0, 1, now(), now() - interval '1 minute', now() + interval '5 minutes', '66666666-6666-4666-8666-666666666666') RETURNING id`, [student.schoolId, student.userId]);
+    const repository = new PostgresPlatformRepository({ apiPool, controlPool });
+    await repository.recoverPendingAiJobs();
+    const stored = await controlPool.query<{ status: string; stage: string; progress: number; attempt_count: number }>('SELECT status, stage, progress, attempt_count FROM ai_jobs WHERE id = $1', [inserted.rows[0]!.id]);
+    expect(stored.rows[0]).toEqual({ status: 'FAILED', stage: 'FAILED', progress: 100, attempt_count: 1 });
   });
 });

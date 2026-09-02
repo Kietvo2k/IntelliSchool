@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AnthropicProvider, createAiProvider, OpenAiCompatibleProvider, providerFromModel } from '../src/services/ai/providers.js';
+import { AnthropicProvider, buildProviderStatus, createAiProvider, OpenAiCompatibleProvider, providerFromModel, validateProviderEndpoint } from '../src/services/ai/providers.js';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; vi.restoreAllMocks(); });
@@ -59,8 +59,8 @@ describe('AI provider adapters', () => {
     expect(missing).toBeNull();
   });
 
-  it('retries the fallback model after the primary chat call fails', async () => {
-    const { chatWithFallback } = await import('../src/services/ai/providers.js');
+  it('does not switch to a fallback model after the primary chat call fails', async () => {
+    const { chatWithProvider } = await import('../src/services/ai/providers.js');
     const fetchMock = vi.fn(async (_url, init) => {
       const body = JSON.parse(String((init as RequestInit).body));
       if (body.model === 'deepseek-v4-flash') return new Response('timeout', { status: 504 });
@@ -68,14 +68,12 @@ describe('AI provider adapters', () => {
     });
     globalThis.fetch = fetchMock as never;
     const provider = new OpenAiCompatibleProvider({ baseUrl: 'https://api.example/v1', apiKey: 'k', modelName: 'deepseek-v4-flash' });
-    const result = await chatWithFallback(provider, [{ role: 'user', content: 'Hi' }], { timeoutMs: 1000 }, { AI_FALLBACK_MODEL: 'kimi-k2.6' });
-    expect(result.text).toBe('OK');
-    expect(result.usedModel).toBe('kimi-k2.6');
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    await expect(chatWithProvider(provider, [{ role: 'user', content: 'Hi' }], { timeoutMs: 1000 }, { AI_FALLBACK_MODEL: 'kimi-k2.6' })).rejects.toThrow('AI_PROVIDER_UNAVAILABLE');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('skips a same-model retry after abort and uses the fallback model', async () => {
-    const { chatWithFallback } = await import('../src/services/ai/providers.js');
+  it('skips a same-model retry after abort and surfaces provider unavailability', async () => {
+    const { chatWithProvider } = await import('../src/services/ai/providers.js');
     const fetchMock = vi.fn(async (_url, init) => {
       const body = JSON.parse(String((init as RequestInit).body));
       if (body.model === 'deepseek-v4-flash') {
@@ -87,9 +85,37 @@ describe('AI provider adapters', () => {
     });
     globalThis.fetch = fetchMock as never;
     const provider = new OpenAiCompatibleProvider({ baseUrl: 'https://api.example/v1', apiKey: 'k', modelName: 'deepseek-v4-flash' });
-    const result = await chatWithFallback(provider, [{ role: 'user', content: 'Hi' }], { timeoutMs: 1000 }, { AI_FALLBACK_MODEL: 'kimi-k2.6' });
-    expect(result.text).toBe('OK');
-    expect(result.usedModel).toBe('kimi-k2.6');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await expect(chatWithProvider(provider, [{ role: 'user', content: 'Hi' }], { timeoutMs: 1000 }, { AI_FALLBACK_MODEL: 'kimi-k2.6' })).rejects.toThrow('AI_PROVIDER_UNAVAILABLE');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts only HTTPS provider endpoints from the server allowlist', () => {
+    expect(validateProviderEndpoint('https://api.example/v1', ['https://api.example/v1']).ok).toBe(true);
+    expect(validateProviderEndpoint('http://api.example/v1', ['http://api.example/v1']).ok).toBe(false);
+    expect(validateProviderEndpoint('https://127.0.0.1/v1', ['https://127.0.0.1/v1']).ok).toBe(false);
+    expect(providerFromModel(
+      { provider: 'openai', modelName: 'gpt', endpointUrl: 'https://evil.example/v1' },
+      { AI_OPENAI_BASE_URL: 'https://api.example/v1', AI_OPENAI_API_KEY: 'k', AI_OPENAI_MODEL: 'gpt' },
+    )).toBeNull();
+  });
+
+  it('rejects redirects at the fetch boundary', async () => {
+    globalThis.fetch = vi.fn(async (_url, init) => {
+      expect((init as RequestInit).redirect).toBe('error');
+      return new Response('', { status: 307, headers: { location: 'https://internal.example/v1' } });
+    }) as never;
+    const provider = new OpenAiCompatibleProvider({ baseUrl: 'https://api.example/v1', apiKey: 'k', modelName: 'gpt', enforceNetworkSafety: false });
+    await expect(provider.chat([{ role: 'user', content: 'Hi' }], { timeoutMs: 1000 })).rejects.toThrow(/AI_PROVIDER_UNAVAILABLE/);
+  });
+
+  it('reports public health fields without exposing configuration secrets', () => {
+    expect(buildProviderStatus({ configured: true, reachable: false, provider: 'OPENAI_COMPATIBLE', model: 'gpt', checkedAt: '2026-09-02T00:00:00.000Z' })).toEqual({
+      configured: true,
+      reachable: false,
+      capabilities: { chat: true, embeddings: true, structuredOutput: true },
+      provider: 'OPENAI_COMPATIBLE',
+      model: 'gpt',
+      checkedAt: '2026-09-02T00:00:00.000Z',
+    });
   });
 });

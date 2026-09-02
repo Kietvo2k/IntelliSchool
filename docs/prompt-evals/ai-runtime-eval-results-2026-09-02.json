@@ -1,0 +1,43 @@
+{
+  "evalSet": "ai-runtime-production-2026-09-02.json",
+  "caseCount": 18,
+  "promptBaseline": {"tokenCount": 650, "clarityScore": 95, "structureScore": 90},
+  "promptRevision": {"tokenCount": 650, "clarityScore": 95, "structureScore": 90, "gate": "PASS"},
+  "cases": [
+    {"id":"AI01","status":"PASS","evidence":"Provider status unit contract; live provider smoke."},
+    {"id":"AI02","status":"PASS","evidence":"Missing-provider repository integration returns 503 AI_UNAVAILABLE; no fallback."},
+    {"id":"AI03","status":"PASS","evidence":"Provider 5xx/abort unit tests; bounded retry then AI_PROVIDER_UNAVAILABLE."},
+    {"id":"AI04","status":"PASS","evidence":"Live grounded chat returns MODEL, provider, usedModel, usage and requestId."},
+    {"id":"AI05","status":"PASS","evidence":"Live grounded chat returns citations; citation marker is validated."},
+    {"id":"AI06","status":"PASS","evidence":"GENERAL/PERSONAL_STUDY prompt contract discloses missing context; no retrieval fallback."},
+    {"id":"AI07","status":"PASS","evidence":"RAG scope unit plus isolated PostgreSQL tenant tests."},
+    {"id":"AI08","status":"PASS","evidence":"Untrusted-context prompt test, input guard and static AI threat scan."},
+    {"id":"AI09","status":"PASS","evidence":"Live teacher compose; JSON object normalized only after Zod validation."},
+    {"id":"AI10","status":"PASS","evidence":"Live career analysis with model, usage and request correlation."},
+    {"id":"AI11","status":"PASS","evidence":"Live aptitude essay grading with structured schema and usage."},
+    {"id":"AI12","status":"PASS","evidence":"Atomic SQL claim and live Thinking job evidence."},
+    {"id":"AI13","status":"PASS","evidence":"Isolated stale-job reclaim integration with exhausted-attempt terminal state."},
+    {"id":"AI14","status":"PASS","evidence":"Queued-job cancel integration and cancel HTTP route."},
+    {"id":"AI15","status":"PASS","evidence":"HTTPS allowlist/private-IP/redirect provider tests; DNS public-address check."},
+    {"id":"AI16","status":"PASS","evidence":"Zod structured-output tests and live compose validation."},
+    {"id":"AI17","status":"PASS","evidence":"Cost guard, timeout, bounded structured retry and bounded sandbox tests."},
+    {"id":"AI18","status":"PASS","evidence":"Release script checks 18 cases and requires live provider configuration."}
+  ],
+  "securityScan": {
+    "promptsTested": 8,
+    "overallRisk": "critical_expected_from_adversarial_inputs",
+    "covered": ["LLM Prompt Injection", "Indirect Prompt Injection", "Agent Tool Abuse", "LLM Data Extraction"],
+    "notTested": ["Poison Training Data", "Craft Adversarial Data", "Exfiltration via ML Inference API"]
+  },
+  "browserEvidence": {"aiCareerJourney": "2/2 pass on app-test without provider secret; unavailable state and no-fallback rendering verified."},
+  "ragToolEvidence": {
+    "documents": 25,
+    "chunkingRecommendation": "paragraph_based",
+    "chunkingScore": 0.561,
+    "retrievalPrecisionAt1": 0.5,
+    "retrievalPrecisionAt5": 0.15,
+    "retrievalRecallAt5": 0.5,
+    "finding": "TF-IDF evaluation helper is below the typical recall floor; this remains an optimization finding and is not treated as a release pass."
+  },
+  "liveBatchNote": "The all-cases live batch was intermittently rate-limited by the configured provider. Release evidence runs each live capability in a fresh sequential process; each required capability passed independently."
+}

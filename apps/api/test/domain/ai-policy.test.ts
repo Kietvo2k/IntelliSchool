@@ -15,9 +15,11 @@ describe('AI provider and RAG security policy', () => {
   it('filters RAG chunks by the exact school and the allowed class/subject scope', () => {
     const chunks = [
       { id: 'ok', schoolId: 'school-a', classId: 'class-a', subjectId: 'math' },
+      { id: 'school-wide', schoolId: 'school-a', classId: null, subjectId: null },
       { id: 'other-school', schoolId: 'school-b', classId: 'class-a', subjectId: 'math' },
       { id: 'other-subject', schoolId: 'school-a', classId: 'class-a', subjectId: 'physics' },
+      { id: 'other-class', schoolId: 'school-a', classId: 'class-b', subjectId: 'math' },
     ];
-    expect(filterRagChunks(chunks, { schoolId: 'school-a', classId: 'class-a', subjectId: 'math' }).map((chunk) => chunk.id)).toEqual(['ok']);
+    expect(filterRagChunks(chunks, { schoolId: 'school-a', classIds: ['class-a'], subjectId: 'math' }).map((chunk) => chunk.id)).toEqual(['ok', 'school-wide']);
   });
 });

@@ -10,6 +10,7 @@ const INJECTION_PATTERNS: RegExp[] = [
   /ignore .{0,30}(instructions|rules|prompts)/i,
   /(reveal|show|print|lộ|tiết lộ).{0,30}(system prompt|api key|khóa api|prompt hệ thống)/i,
   /you are now|bây giờ bạn là|act as (an?|the) (unfiltered|jailbroken)/i,
+  /developer mode|system override|bypass .{0,30}(approval|safety|check)|\b(delete|drop|exec|execute)\b.{0,30}\b(tool|table|file|data)\b/i,
 ];
 
 export interface GuardResult {

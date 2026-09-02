@@ -307,7 +307,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       const message = error instanceof Error && error.message.trim() ? error.message : 'Yêu cầu không hợp lệ.';
       return reply.code(statusCode).send(errorBody(request, code, message));
     }
-    console.error(error);
+    console.error({ requestId: request.id, code: 'INTERNAL_ERROR' });
     return reply.code(500).send(errorBody(request, 'INTERNAL_ERROR', 'Hệ thống gặp lỗi không mong muốn. Vui lòng thử lại.'));
   });
 
@@ -923,7 +923,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Câu trả lời năng lực không hợp lệ.'));
     const repository = requirePlatformRepository(request, reply);
     if (!repository) return;
-    return reply.code(201).send({ data: await repository.saveAptitudeAssessment(auth, parsed.data.answers, idempotencyKey) });
+    return reply.code(201).send({ data: await repository.saveAptitudeAssessment(auth, parsed.data.answers, idempotencyKey, request.id) });
   });
 
   app.get('/api/v1/career/profile', async (request, reply) => {
@@ -970,7 +970,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     return reply.send({ data: await repository.getStudentCareerProfile(auth, studentId) });
   });
 
-  const studentMutation = (schema: z.ZodTypeAny, invalidMessage: string, run: (repo: PlatformRepository, auth: AuthContext, body: unknown, key: string) => Promise<unknown>, status = 201) =>
+  const studentMutation = (schema: z.ZodTypeAny, invalidMessage: string, run: (repo: PlatformRepository, auth: AuthContext, body: unknown, key: string, request: FastifyRequest) => Promise<unknown>, status = 201) =>
     async (request: FastifyRequest, reply: FastifyReply) => {
       const auth = await requirePlatformRole(request, reply, ['STUDENT']);
       if (!auth) return;
@@ -981,7 +981,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', invalidMessage));
       const repository = requirePlatformRepository(request, reply);
       if (!repository) return;
-      return reply.code(status).send({ data: await run(repository, auth, parsed.data, idempotencyKey) });
+      return reply.code(status).send({ data: await run(repository, auth, parsed.data, idempotencyKey, request) });
     };
   const studentQuery = (run: (repo: PlatformRepository, auth: AuthContext) => Promise<unknown>) =>
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -1038,7 +1038,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
   app.get('/api/v1/career/ai/agents', studentQuery((repo, auth) => repo.listCareerAgents(auth)));
   app.get('/api/v1/career/ai/runs', studentQuery((repo, auth) => repo.listCareerAnalysisRuns(auth)));
-  app.post('/api/v1/career/ai/analyze', studentMutation(careerAnalyzeSchema, 'Yêu cầu phân tích không hợp lệ.', (repo, auth, body, key) => repo.analyzeCareer(auth, body as never, key)));
+  app.post('/api/v1/career/ai/analyze', studentMutation(careerAnalyzeSchema, 'Yêu cầu phân tích không hợp lệ.', (repo, auth, body, key, request) => repo.analyzeCareer(auth, body as never, key, request.id)));
   app.get('/api/v1/exams/open', studentQuery((repo, auth) => repo.listOpenExams(auth)));
   app.post('/api/v1/exams/sessions', studentMutation(startExamSchema, 'Thông tin vào ca thi không hợp lệ.', (repo, auth, body, key) => repo.startExamSession(auth, body as never, key)));
   app.get('/api/v1/exams/sessions/:id', async (request, reply) => {
@@ -1196,7 +1196,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     if (!auth) return;
     const repository = requirePlatformRepository(request, reply);
     if (!repository) return;
-    return reply.send({ data: await repository.aiHealthCheck(auth) });
+    return reply.send({ data: await repository.aiHealthCheck(auth, request.id) });
   });
 
   app.get('/api/v1/ai/rag/documents', async (request, reply) => {
@@ -1269,7 +1269,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Nội dung trò chuyện không hợp lệ.'));
     const repository = requirePlatformRepository(request, reply);
     if (!repository) return;
-    return reply.code(201).send({ data: await repository.chatWithAi(auth, parsed.data, idempotencyKey) });
+    return reply.code(201).send({ data: await repository.chatWithAi(auth, parsed.data, idempotencyKey, request.id) });
   });
 
   app.post('/api/v1/ai/jobs', async (request, reply) => {
@@ -1282,7 +1282,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     if (!parsed.success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Nội dung AI job không hợp lệ.'));
     const repository = requirePlatformRepository(request, reply);
     if (!repository) return;
-    return reply.code(202).send({ data: await repository.createAiJob(auth, parsed.data, idempotencyKey) });
+    return reply.code(202).send({ data: await repository.createAiJob(auth, parsed.data, idempotencyKey, request.id) });
   });
   app.get('/api/v1/ai/jobs', async (request, reply) => {
     const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER', 'TEACHER', 'STUDENT']);
@@ -1300,6 +1300,19 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     const repository = requirePlatformRepository(request, reply);
     if (!repository) return;
     return reply.send({ data: await repository.getAiJob(auth, jobId) });
+  });
+
+  app.post('/api/v1/ai/jobs/:jobId/cancel', async (request, reply) => {
+    const auth = await requirePlatformRole(request, reply, ['SCHOOL_OWNER', 'TEACHER', 'STUDENT']);
+    if (!auth) return;
+    if (!requestOriginIsAllowed(request)) return reply.code(403).send(errorBody(request, 'ORIGIN_NOT_ALLOWED', 'Nguồn gửi yêu cầu không được phép.'));
+    const idempotencyKey = requireIdempotencyKey(request, reply);
+    if (!idempotencyKey) return;
+    const jobId = (request.params as { jobId: string }).jobId;
+    if (!z.string().uuid().safeParse(jobId).success) return reply.code(422).send(errorBody(request, 'VALIDATION_ERROR', 'Mã AI job không hợp lệ.'));
+    const repository = requirePlatformRepository(request, reply);
+    if (!repository) return;
+    return reply.send({ data: await repository.cancelAiJob(auth, jobId, idempotencyKey, request.id) });
   });
 
   app.post('/api/v1/sync/events', async (request, reply) => {
