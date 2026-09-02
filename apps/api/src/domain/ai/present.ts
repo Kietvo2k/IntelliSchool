@@ -1,7 +1,11 @@
 /** Never leak raw JSON/code fences to students. */
 
+function withoutReasoningBlocks(raw: string): string {
+  return raw.replace(/<think(?:ing)?\b[^>]*>[\s\S]*?<\/think(?:ing)?>/gi, '');
+}
+
 export function presentAssistantText(purpose: string | undefined, raw: string): string {
-  const trimmed = (raw ?? '').trim();
+  const trimmed = withoutReasoningBlocks(raw ?? '').trim();
   if (!trimmed) return 'Đã ghi nhận.';
 
   const fenced = trimmed.match(/```json\s*([\s\S]*?)```/i);

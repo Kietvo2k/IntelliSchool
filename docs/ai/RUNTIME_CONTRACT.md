@@ -45,6 +45,12 @@ final answer cho học sinh, không xuất deliberation, kế hoạch trả lờ
 về policy. Chống gian lận chỉ từ chối khi yêu cầu đáp án gắn rõ với assessment đang mở;
 hỏi bài hoặc xin hướng dẫn thông thường được phép đi tới model.
 
+Citation của AI học tập chỉ được truy hồi từ source kind `RESOURCE`, `LESSON` hoặc
+`TEXT`; hồ sơ học sinh, gradebook, career snapshot và chat memory không được xuất hiện
+như nguồn học tập. Nếu response grounded đầu tiên thiếu citation hợp lệ, server gọi lại
+cùng provider đúng một lần với yêu cầu định dạng; budget dự phòng cho lần retry này.
+Block provider trả theo `<think>…</think>` bị loại bỏ trước khi lưu/hiển thị.
+
 Structured output của teacher compose, career analysis, aptitude essay và interview
 được parse rồi validate bằng Zod; JSON/schema lỗi là `502 AI_OUTPUT_INVALID` và không
 được lưu như kết quả hợp lệ. RAG citation phải tham chiếu số citation thực tế; thiếu

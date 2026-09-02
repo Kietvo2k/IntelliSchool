@@ -34,6 +34,7 @@ import { extractJsCodeFence, runSandboxedJs } from '../domain/ai/sandbox.js';
 import { AiProviderError, buildProviderStatus, checkAiProvider, chatWithProvider, providerFromModel, validateProviderEndpoint } from '../services/ai/providers.js';
 import { chatWithStructured } from '../services/ai/structured-call.js';
 import { chunkText, extractLessonText, localEmbed, rankChunks, EMBEDDING_DIM } from '../domain/ai/rag.js';
+import { STUDY_RAG_SOURCE_KINDS } from '../domain/ai/rag-source-policy.js';
 import { guardUserPrompt, looksLikeAnswerFishing } from '../domain/ai/guard.js';
 import { estimateCostVnd, approximateTokens, checkBudget } from '../domain/ai/cost.js';
 import { decryptExamSnapshot, encryptExamSnapshot, type ExamSnapshotKeyring, type ExamSnapshotMetadata, type ExamSnapshotPlaintext } from '../security/exam-snapshot.js';
@@ -43,6 +44,7 @@ import {
   buildTeacherComposePrompt,
   buildUserPrompt,
   decideMode,
+  hasGroundedCitationReference,
   looksLikeComposeConfirm,
   type AiAnswerMode,
   type ChatCitation,
@@ -2918,9 +2920,10 @@ export class PostgresPlatformRepository implements PlatformRepository {
         )
         AND ($8::uuid[] IS NULL OR d.resource_id = ANY($8))
         AND ($9::uuid[] IS NULL OR ch.class_id IS NULL OR ch.class_id = ANY($9))
+        AND d.source_kind = ANY($10::text[])
         AND (d.resource_id IS NULL OR EXISTS (SELECT 1 FROM resources r WHERE r.id = d.resource_id AND r.school_id = $1 AND r.status = 'READY'))
       LIMIT 2000
-    `, [schoolId, input.classId ?? null, input.subjectId ?? null, input.learnerUserId ?? null, input.documentIds && input.documentIds.length > 0 ? input.documentIds : null, input.lessonIds && input.lessonIds.length > 0 ? input.lessonIds : null, input.sourceMode ?? 'AUTO', input.attachmentResourceIds && input.attachmentResourceIds.length > 0 ? input.attachmentResourceIds : null, allowedClassIds]);
+    `, [schoolId, input.classId ?? null, input.subjectId ?? null, input.learnerUserId ?? null, input.documentIds && input.documentIds.length > 0 ? input.documentIds : null, input.lessonIds && input.lessonIds.length > 0 ? input.lessonIds : null, input.sourceMode ?? 'AUTO', input.attachmentResourceIds && input.attachmentResourceIds.length > 0 ? input.attachmentResourceIds : null, allowedClassIds, STUDY_RAG_SOURCE_KINDS]);
     const queryVector = localEmbed(query);
     const ranked = rankChunks(
       queryVector,
@@ -3080,7 +3083,8 @@ export class PostgresPlatformRepository implements PlatformRepository {
       const estInput = approximateTokens(systemPrompt + userPrompt);
       const pricing = { inputVndPer1k: runtimeModel.input_vnd_per_1k, outputVndPer1k: runtimeModel.output_vnd_per_1k };
       const estimatedOutputTokens = input.purpose === 'TEACHER_COMPOSE' ? 1_400 : input.reasoningMode === 'THINKING' ? 1_400 : 800;
-      const budget = checkBudget({ usedVnd: modelInfo.usedVnd, estimatedRequestVnd: estimateCostVnd(estInput, estimatedOutputTokens, pricing), limitVnd: runtimeModel.monthly_cost_limit_vnd == null ? null : numeric(runtimeModel.monthly_cost_limit_vnd) });
+      const reservedAttempts = citations.length > 0 ? 2 : 1;
+      const budget = checkBudget({ usedVnd: modelInfo.usedVnd, estimatedRequestVnd: estimateCostVnd(estInput * reservedAttempts, estimatedOutputTokens * reservedAttempts, pricing), limitVnd: runtimeModel.monthly_cost_limit_vnd == null ? null : numeric(runtimeModel.monthly_cost_limit_vnd) });
       if (!budget.allowed) throw new AppError(429, 'AI_BUDGET_EXCEEDED', 'Đã đạt hạn mức chi phí AI trong tháng của trường.');
       try {
         if (input.purpose === 'TEACHER_COMPOSE') {
@@ -3116,16 +3120,23 @@ export class PostgresPlatformRepository implements PlatformRepository {
           outputTokens = Math.max(0, result.usage.outputTokens);
           answer = presentInterviewTurn(JSON.stringify(result.data));
         } else {
-          const result = await chatWithProvider(provider!, [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], { maxOutputTokens: input.reasoningMode === 'THINKING' ? 1_400 : 800, temperature: input.reasoningMode === 'THINKING' ? 0.2 : 0.3, timeoutMs: input.reasoningMode === 'THINKING' ? 60_000 : undefined, requestId, signal });
+          const messages = [{ role: 'system' as const, content: systemPrompt }, { role: 'user' as const, content: userPrompt }];
+          const options = { maxOutputTokens: input.reasoningMode === 'THINKING' ? 1_400 : 800, temperature: input.reasoningMode === 'THINKING' ? 0.2 : 0.3, timeoutMs: input.reasoningMode === 'THINKING' ? 60_000 : undefined, requestId, signal };
+          const initial = await chatWithProvider(provider!, messages, options);
+          const needsCitationRepair = citations.length > 0 && !hasGroundedCitationReference(initial.text, citations.length);
+          const repaired = needsCitationRepair
+            ? await chatWithProvider(provider!, [
+                ...messages,
+                { role: 'user', content: `Trả lời lại câu hỏi trên. Bắt buộc dẫn ít nhất một citation hợp lệ trong [1] đến [${citations.length}]. Không giải thích quy tắc định dạng và không tạo citation ngoài phạm vi này.` },
+              ], options)
+            : null;
+          const result = repaired ?? initial;
           usedModel = result.usedModel || runtimeModel.model_name;
-          inputTokens = Math.max(0, result.usage.inputTokens);
-          outputTokens = Math.max(0, result.usage.outputTokens);
+          inputTokens = Math.max(0, initial.usage.inputTokens) + Math.max(0, repaired?.usage.inputTokens ?? 0);
+          outputTokens = Math.max(0, initial.usage.outputTokens) + Math.max(0, repaired?.usage.outputTokens ?? 0);
           if (!result.text.trim()) throw new AppError(502, 'AI_OUTPUT_INVALID', 'Provider trả về nội dung rỗng.');
           answer = result.text.trim();
-          if (citations.length > 0) {
-            const refs = [...answer.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1]));
-            if (!refs.some((ref) => Number.isInteger(ref) && ref >= 1 && ref <= citations.length)) throw new AppError(502, 'AI_OUTPUT_INVALID', 'Provider không trả citation hợp lệ cho câu trả lời grounded.');
-          }
+          if (!hasGroundedCitationReference(answer, citations.length)) throw new AppError(502, 'AI_OUTPUT_INVALID', 'Provider không trả citation hợp lệ cho câu trả lời grounded.');
         }
       } catch (error) {
         if (error instanceof AiProviderError && error.code === 'AI_CANCELLED') throw new AppError(409, 'AI_JOB_CANCELLED', 'AI job đã bị hủy.');

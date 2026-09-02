@@ -11,4 +11,8 @@ describe('presentAssistantText', () => {
     expect(presentAssistantText('TEACHER_COMPOSE', raw)).not.toContain('```json');
     expect(presentAssistantText('TEACHER_COMPOSE', raw)).toContain('Đã điền khung');
   });
+
+  it('does not render provider reasoning blocks in the chat log', () => {
+    expect(presentAssistantText('PERSONAL_STUDY', '<think>internal reasoning</think>\n\nLời giải cuối cùng.')).toBe('Lời giải cuối cùng.');
+  });
 });

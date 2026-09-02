@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgresPlatformRepository } from '../src/repositories/postgres-platform.js';
 import { resetAndSeedPilotData, pilotAccounts } from '../src/seed-pilot.js';
 import type { AuthContext } from '../src/types.js';
+import { EMBEDDING_DIM, localEmbed } from '../src/domain/ai/rag.js';
 
 const controlUrl = process.env.SMARTPATH_TEST_CONTROL_DATABASE_URL ?? 'postgres://smartpath_control:smartpath_control_local_only@127.0.0.1:5433/smartclass';
 const apiUrl = process.env.SMARTPATH_TEST_API_DATABASE_URL ?? 'postgres://smartpath_api:smartpath_api_local_only@127.0.0.1:5433/smartclass';
@@ -54,6 +55,27 @@ describe('RAG ingestion + AI chat', () => {
   it('blocks a student from ingesting knowledge', async () => {
     const repository = new PostgresPlatformRepository({ apiPool, controlPool });
     await expect(repository.ingestRagContent(student, { sourceKind: 'TEXT', title: 'X', text: 'y'.repeat(30) }, 'rag-ingest-int-forbidden')).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('never retrieves learner-profile chunks as learning citations', async () => {
+    const material = await controlPool.query<{ id: string }>(`
+      INSERT INTO rag_documents (school_id, source_kind, title, status, chunk_count, created_by)
+      VALUES ($1, 'TEXT', 'Ôn tập đạo hàm', 'READY', 1, $2) RETURNING id
+    `, [student.schoolId, teacher.userId]);
+    const profile = await controlPool.query<{ id: string }>(`
+      INSERT INTO rag_documents (school_id, source_kind, title, status, chunk_count, created_by, user_id)
+      VALUES ($1, 'LEARNER_PROFILE', 'Hồ sơ học tập', 'READY', 1, $2, $3) RETURNING id
+    `, [student.schoolId, student.userId, student.userId]);
+    const materialText = 'Đạo hàm của x bình phương là 2x. Đây là kiến thức Toán dùng để học và luyện tập.';
+    const profileText = 'Điểm Toán của học sinh là 8.5. Hồ sơ này không phải tài liệu học tập.';
+    for (const [documentId, content, sourceKind] of [[material.rows[0]!.id, materialText, 'TEXT'], [profile.rows[0]!.id, profileText, 'LEARNER_PROFILE']] as const) {
+      await controlPool.query(`INSERT INTO rag_chunks (school_id, document_id, ordinal, content, embedding, embedding_dim, citation)
+        VALUES ($1, $2, 0, $3, $4, $5, $6::jsonb)`, [student.schoolId, documentId, content, localEmbed(content), EMBEDDING_DIM, JSON.stringify({ sourceKind })]);
+    }
+    const repository = new PostgresPlatformRepository({ apiPool, controlPool });
+    const search = await repository.searchRag(student, { query: 'đạo hàm x bình phương' }) as { citations: Array<{ sourceKind: string }> };
+    expect(search.citations.length).toBeGreaterThan(0);
+    expect(search.citations.every((citation) => citation.sourceKind !== 'LEARNER_PROFILE')).toBe(true);
   });
 
   it('runs a Thinking turn through a durable job and completes with a structured result', async () => {

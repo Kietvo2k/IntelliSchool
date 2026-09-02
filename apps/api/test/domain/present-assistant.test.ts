@@ -10,4 +10,8 @@ describe('presentAssistantText', () => {
     expect(presentAssistantText('CAREER_CHAT', '{"report":"Nên xem thêm ngành CNTT."}')).toBe('Nên xem thêm ngành CNTT.');
     expect(presentAssistantText('ASSISTANT', '{ "oops": true }')).toBe('Đã ghi nhận câu trả lời.');
   });
+
+  it('removes provider reasoning blocks before returning student-facing text', () => {
+    expect(presentAssistantText('PERSONAL_STUDY', '<think>Phân tích nội bộ không được hiển thị.</think>\n\nĐây là lời giải cho em.')).toBe('Đây là lời giải cho em.');
+  });
 });

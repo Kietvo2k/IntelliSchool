@@ -112,3 +112,15 @@
   ghi `agentic: true`, `sourceMode: AUTO`, `reasoningMode: STANDARD`.
 - Verification: `npm run verify` pass API 230 test, web 61 test, lint/typecheck/build;
   container `5176` healthy sau build lại.
+
+## Cập nhật RAG citation và output containment — 2026-09-02
+
+- Root cause từ live chat: `LEARNER_PROFILE` cùng user_id được retrieval `AUTO` đưa vào
+  citation học tập, nên query đạo hàm từng trích hồ sơ điểm/RIASEC không liên quan.
+- Retrieval giờ chỉ citation `RESOURCE`, `LESSON`, `TEXT`; `LEARNER_PROFILE`,
+  `GRADEBOOK`, `CAREER_SNAPSHOT`, `CHAT_MEMORY` bị loại khỏi đường AI học tập.
+- Khi grounded response thiếu `[n]`, server retry một lần với chính provider và reserve
+  budget cho hai lần gọi; không tự tạo citation. `<think>…</think>` bị loại ở API/UI.
+- Evidence: integration RAG isolated 7/7, Playwright 320px pass, full verify API 233/web
+  62 pass; live request `cf79bd6d-eff0-4891-9140-dba02be9219b` trả citation duy nhất
+  `TEXT / Ôn tập đạo hàm cơ bản`, không còn hồ sơ học tập.
