@@ -108,7 +108,9 @@ export interface RankedChunk {
 }
 
 /** Xếp hạng chunk theo cosine với vector truy vấn; lọc theo ngưỡng tối thiểu và giới hạn topK. */
-export function rankChunks(queryVector: readonly number[], chunks: readonly RankableChunk[], topK = 5, minScore = 0.05): RankedChunk[] {
+export const DEFAULT_MIN_RETRIEVAL_SCORE = 0.3;
+
+export function rankChunks(queryVector: readonly number[], chunks: readonly RankableChunk[], topK = 5, minScore = DEFAULT_MIN_RETRIEVAL_SCORE): RankedChunk[] {
   return chunks
     .map((chunk) => ({ id: chunk.id, score: cosineSimilarity(queryVector, chunk.embedding) }))
     .filter((ranked) => ranked.score >= minScore)

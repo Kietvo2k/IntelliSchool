@@ -41,6 +41,12 @@ describe('local embedding', () => {
     expect(ranked[0]!.id).toBe('math');
   });
 
+  it('drops weak matches instead of forcing unrelated citations', () => {
+    const query = localEmbed('nguồn gốc của Internet và ARPANET');
+    const unrelated = { id: 'math', embedding: localEmbed('đạo hàm của x bình phương là 2x') };
+    expect(rankChunks(query, [unrelated], 5)).toEqual([]);
+  });
+
   it('cosine of identical vectors is 1', () => {
     const vector = localEmbed('kiểm tra cosine');
     expect(cosineSimilarity(vector, vector)).toBeCloseTo(1, 5);
