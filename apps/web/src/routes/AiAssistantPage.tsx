@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
-import { ChatShell, type ChatAttachment, type ChatReasoningMode, type ChatSessionItem, type ChatSourceMode } from '../components/ui/ChatShell.js';
+import { ChatShell, type ChatAttachment, type ChatSessionItem } from '../components/ui/ChatShell.js';
 import { type ChatBubble } from '../components/ui/ChatThread.js';
 import { PageHeader } from '../components/ui/PageHeader.js';
 import { apiRequest, apiUrl, ApiRequestError, ensureApiBase, newIdempotencyKey } from '../lib/api.js';
 import { useCatalog, type ClassOption, type SubjectOption } from '../lib/catalog.js';
 import { presentAssistantText } from '../lib/present-assistant.js';
 import { useSession } from '../lib/SessionContext.js';
+import { STUDY_CHAT_DEFAULTS } from './ai-study-defaults.js';
+import './ai-study.css';
 
 interface Citation { documentId: string; documentTitle: string; chunkId: string; ordinal: number; score: number; snippet: string }
 interface ChatReply {
@@ -53,9 +55,6 @@ export function AiAssistantPage() {
   const [tokenCount, setTokenCount] = useState(0);
   const [tokenLimit, setTokenLimit] = useState(128_000);
   const [runCode, setRunCode] = useState(false);
-  const [reasoningMode, setReasoningMode] = useState<ChatReasoningMode>('STANDARD');
-  const [agentic, setAgentic] = useState(false);
-  const [sourceMode, setSourceMode] = useState<ChatSourceMode>('AUTO');
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [toolRuns, setToolRuns] = useState<ChatReply['toolRuns']>([]);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
@@ -144,31 +143,15 @@ export function AiAssistantPage() {
         purpose: learner ? 'PERSONAL_STUDY' : 'ASSISTANT',
         documentIds: documentIds.length ? documentIds : undefined,
         lessonIds: lessonIds.length ? lessonIds : undefined,
-        runCode: agentic && (runCode || text.includes('```')),
-        reasoningMode,
-        agentic,
-        sourceMode,
+        runCode: STUDY_CHAT_DEFAULTS.agentic && (runCode || text.includes('```')),
+        ...STUDY_CHAT_DEFAULTS,
         attachmentResourceIds: attachments.filter((item) => item.status === 'READY').map((item) => item.id),
       };
-      let reply: ChatReply | null = null;
-      if (reasoningMode === 'THINKING') {
-        const queued = await apiRequest<{ jobId: string }>('/api/v1/ai/jobs', { method: 'POST', idempotencyKey: newIdempotencyKey('ai-job'), body: requestBody });
-        setActiveJobId(queued.jobId);
-        try { sessionStorage.setItem('smartpath-active-ai-job', queued.jobId); } catch { /* private mode */ }
-        setNotice('Thinking đang xếp hàng · hệ thống sẽ cập nhật tiến độ thật, tối đa 5 phút.');
-        for (let attempt = 0; attempt < 300; attempt += 1) {
-          await new Promise((resolve) => window.setTimeout(resolve, 1_000));
-          const job = await apiRequest<{ status: string; stage: string; progress: number; result?: ChatReply; error?: string }>(`/api/v1/ai/jobs/${queued.jobId}`);
-          setNotice(`Thinking · ${job.stage} · ${job.progress}%`);
-          if (job.status === 'COMPLETED' && job.result) { reply = job.result; break; }
-          if (job.status === 'FAILED' || job.status === 'CANCELLED') throw new Error(job.error || 'AI job chưa hoàn tất.');
-        }
-        if (!reply) throw new Error('AI job quá thời gian chờ 5 phút. Em có thể gửi lại với chế độ Tiêu chuẩn.');
-        try { sessionStorage.removeItem('smartpath-active-ai-job'); } catch { /* private mode */ }
-        setActiveJobId(null);
-      } else {
-        reply = await apiRequest<ChatReply>('/api/v1/ai/chat', { method: 'POST', idempotencyKey: newIdempotencyKey('ai-chat'), body: requestBody });
-      }
+      const reply = await apiRequest<ChatReply>('/api/v1/ai/chat', {
+        method: 'POST',
+        idempotencyKey: newIdempotencyKey('ai-chat'),
+        body: requestBody,
+      });
       setSessionId(reply.sessionId);
       setTokenCount(reply.tokenCount ?? 0);
       setTokenLimit(reply.tokenLimit ?? 128_000);
@@ -213,7 +196,7 @@ export function AiAssistantPage() {
       const payload = await response.json() as { data?: { id?: string } };
       if (!response.ok || !payload.data?.id) throw new Error('Tài liệu chưa được tải lên.');
       setAttachments((current) => current.map((item) => item.id === localId ? { ...item, id: payload.data!.id!, status: 'READY' } : item));
-      setNotice('Đã thêm tài liệu riêng. Chọn “Tài liệu của em” để ưu tiên tài liệu này.');
+      setNotice('Đã thêm tài liệu riêng. AI sẽ tự cân nhắc tài liệu này trong phạm vi an toàn.');
     } catch (error) {
       setAttachments((current) => current.map((item) => item.id === localId ? { ...item, status: 'FAILED' } : item));
       setNotice(error instanceof Error ? error.message : 'Chưa tải được tài liệu.');
@@ -230,8 +213,9 @@ export function AiAssistantPage() {
   }
 
   return (
-    <>
+    <div className="ai-study-page">
       <PageHeader
+        compact
         eyebrow={learner ? 'Học tập cá nhân' : 'Soạn bài AI'}
         title={learner ? 'AI học tập' : 'Soạn bài AI'}
         lede={learner
@@ -239,6 +223,7 @@ export function AiAssistantPage() {
           : 'Ưu tiên trả lời dựa trên tài liệu của trường và trích dẫn nguồn. Khi không có tài liệu phù hợp, câu trả lời dùng kiến thức chung và ghi rõ điều đó. Không đưa đáp án trực tiếp cho bài đang mở.'}
       />
 
+      <div className="ai-study-chat">
       <ChatShell
         sessions={sessions}
         currentSessionId={sessionId}
@@ -260,12 +245,6 @@ export function AiAssistantPage() {
           </div>
         ) : null}
         footerNote={activeJobId ? <button type="button" className="button button-quiet text-xs" onClick={() => void cancelThinking()}>Hủy Thinking</button> : undefined}
-        reasoningMode={reasoningMode}
-        agentic={agentic}
-        sourceMode={sourceMode}
-        onReasoningModeChange={setReasoningMode}
-        onAgenticChange={setAgentic}
-        onSourceModeChange={setSourceMode}
         onAttachFile={attachFile}
         attachments={attachments}
         contextSlot={(
@@ -273,7 +252,7 @@ export function AiAssistantPage() {
             <h2 id="scope-title">AI tự chọn tài liệu</h2>
             <p className="muted-copy">Mỗi câu hỏi sẽ tự đọc bài giảng và tài liệu phù hợp với lớp/môn. Em không cần mở từng tài liệu; có thể điều chỉnh phạm vi khi muốn.</p>
             <details className="ai-context-advanced">
-              <summary>Điều chỉnh phạm vi (tùy chọn)</summary>
+              <summary>Tài liệu: tự động · Điều chỉnh phạm vi</summary>
             <div className="filter-row">
               {!learner && (
                 <>
@@ -327,6 +306,7 @@ export function AiAssistantPage() {
           </section>
         )}
       />
-    </>
+      </div>
+    </div>
   );
 }

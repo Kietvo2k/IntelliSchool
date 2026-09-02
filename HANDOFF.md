@@ -96,3 +96,19 @@
   live backend pass 4/4 capability; `npm run verify` pass với API 227 test và web 60 test.
 - Container hiện chạy tại `http://127.0.0.1:5176/`; không dùng `--remove-orphans` và
   không xóa container volume `smartclass-platform_app-data` để bảo toàn dữ liệu local.
+
+## Cập nhật AI học tập gọn và policy học sinh — 2026-09-02
+
+- UI AI học tập đã bỏ thanh chọn Tiêu chuẩn/Thinking/Agentic và nguồn; request học sinh
+  cố định `STANDARD`, `agentic: true`, `sourceMode: AUTO`. Thinking API/job vẫn tồn tại
+  để không phá dữ liệu hoặc worker cũ.
+- Header và phạm vi tài liệu được thu gọn; vùng chat tự giãn theo viewport, giới hạn
+  chiều rộng và bọc nội dung dài/code/table để tránh tràn ngang.
+- Policy answer-fishing chỉ chặn xin đáp án có marker bài kiểm tra, bài thi, quiz,
+  assignment hoặc bài đang mở; câu hỏi học tập thông thường được cho qua. Injection,
+  system prompt extraction và tool abuse vẫn bị chặn.
+- Prompt học sinh yêu cầu final answer only, không xuất deliberation. Browser live đã
+  xác nhận câu hỏi đạo hàm được trả lời bình thường, không lộ tự bàn luận; DB session
+  ghi `agentic: true`, `sourceMode: AUTO`, `reasoningMode: STANDARD`.
+- Verification: `npm run verify` pass API 230 test, web 61 test, lint/typecheck/build;
+  container `5176` healthy sau build lại.

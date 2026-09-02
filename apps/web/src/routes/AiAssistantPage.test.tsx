@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { AiAssistantPage } from './AiAssistantPage.js';
+import { STUDY_CHAT_DEFAULTS } from './ai-study-defaults.js';
 import { SessionContext } from '../lib/SessionContext.js';
 
 function render(role: 'SCHOOL_OWNER' | 'TEACHER' | 'STUDENT') {
@@ -20,10 +21,14 @@ describe('AiAssistantPage', () => {
     expect(markup).toContain('Gửi câu hỏi');
     expect(markup).not.toContain('Hỏi đáp cùng trợ giảng');
     expect(markup).not.toContain('Trợ giảng');
-    expect(markup).toContain('Thinking');
-    expect(markup).toContain('Agentic');
-    expect(markup).toContain('Nguồn thư viện');
+    expect(markup).toContain('Tài liệu: tự động');
+    expect(markup).not.toContain('Thinking');
+    expect(markup).not.toContain('Agentic');
     expect(markup).toContain('Đính kèm tài liệu');
+  });
+
+  it('uses the safe automatic defaults for every student chat request', () => {
+    expect(STUDY_CHAT_DEFAULTS).toEqual({ reasoningMode: 'STANDARD', agentic: true, sourceMode: 'AUTO' });
   });
 
   it('renders soạn bài AI for teachers', () => {

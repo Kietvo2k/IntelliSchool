@@ -39,6 +39,8 @@ function foldVi(text: string): string {
 /** Phát hiện ý định xin đáp án của một bài đang mở (chặn gian lận), tách khỏi hỏi học thuật thường. */
 export function looksLikeAnswerFishing(prompt: string): boolean {
   const folded = foldVi(prompt);
-  return /(dap an|loi giai|answer key|giai giup).{0,40}(bai (kiem tra|thi|tap|dang mo)|de |assignment|quiz)/i.test(folded)
-    || /(cho|gui|doc) (minh|em|toi) dap an/i.test(folded);
+  const requestsDirectAnswer = /(dap an|loi giai|answer key|giai giup)/i.test(folded);
+  const namesAssessment = /(bai kiem tra|bai thi|de thi|bai dang mo|assignment|quiz)/i.test(folded);
+  const signalsActiveAttempt = /(dang mo|dang lam|hien tai|hom nay|chua nop|con thoi gian)/i.test(folded);
+  return requestsDirectAnswer && namesAssessment && signalsActiveAttempt;
 }

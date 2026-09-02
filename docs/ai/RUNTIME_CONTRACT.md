@@ -39,6 +39,12 @@ Các capability đã hoàn tất và Thinking job ghi audit event để Platform
 `/app/audit-log`; metadata chỉ gồm provider/model/usage/trạng thái/requestId, không gồm
 prompt, nội dung trả lời đầy đủ, API key hoặc secret.
 
+AI học tập dành cho học sinh dùng request mặc định `STANDARD`, `agentic: true` và
+`sourceMode: AUTO`; UI không dùng selector mode/source. System prompt phải yêu cầu
+final answer cho học sinh, không xuất deliberation, kế hoạch trả lời hoặc tự bàn luận
+về policy. Chống gian lận chỉ từ chối khi yêu cầu đáp án gắn rõ với assessment đang mở;
+hỏi bài hoặc xin hướng dẫn thông thường được phép đi tới model.
+
 Structured output của teacher compose, career analysis, aptitude essay và interview
 được parse rồi validate bằng Zod; JSON/schema lỗi là `502 AI_OUTPUT_INVALID` và không
 được lưu như kết quả hợp lệ. RAG citation phải tham chiếu số citation thực tế; thiếu
