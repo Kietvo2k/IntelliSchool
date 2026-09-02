@@ -270,6 +270,18 @@ interface ResourceListRepository {
 export interface BuildAppOptions { authRepository?: PostgresAuthRepository; schoolAdministrationRepository?: SchoolAdministrationRepository; platformRepository?: PlatformRepository; resourceRepository?: ResourceListRepository; resourceUploadService?: Pick<ResourceUploadService, 'upload'>; resourceDownloadService?: Pick<ResourceDownloadService, 'getDownload'> & Partial<Pick<ResourceDownloadService, 'getFile'>>; reportExportDownloadService?: Pick<ReportExportDownloadService, 'getDownload'> & Partial<Pick<ReportExportDownloadService, 'getFile'>>; openSignedFile?: (token: string) => Promise<{ stream: Readable; mimeType: string; filename: string }>; }
 
 function errorBody(request: FastifyRequest, code: string, message: string) { return { error: { code, message, request_id: request.id } }; }
+function isAiRoute(request: FastifyRequest): boolean { return request.url.startsWith('/api/v1/ai/'); }
+function writeAiOperationalLog(event: 'ai_request_finished' | 'ai_request_failed', request: FastifyRequest, fields: Record<string, unknown>): void {
+  const entry = JSON.stringify({
+    event,
+    requestId: request.id,
+    method: request.method,
+    route: request.routeOptions.url ?? request.url.split('?')[0],
+    ...fields,
+  });
+  if (event === 'ai_request_failed') console.error(entry);
+  else console.info(entry);
+}
 function requestOriginIsAllowed(request: FastifyRequest): boolean {
   const origin = request.headers.origin;
   return typeof origin !== 'string' || allowedWebOrigins.has(origin);
@@ -285,10 +297,18 @@ function multipartFieldValue(fields: unknown, key: string): string | undefined {
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const app = Fastify({ logger: false, genReqId: () => crypto.randomUUID() });
+  const aiRequestStartedAt = new WeakMap<FastifyRequest, number>();
   const isProduction = process.env.NODE_ENV === 'production';
   const cookieSecure = process.env.COOKIE_SECURE === 'true' || (isProduction && process.env.COOKIE_SECURE !== 'false');
   const rateLimitMax = Number(process.env.RATE_LIMIT_MAX ?? (isProduction ? 100 : 1_000));
-  app.addHook('onRequest', async (request, reply) => { reply.header('x-request-id', request.id); });
+  app.addHook('onRequest', async (request, reply) => {
+    reply.header('x-request-id', request.id);
+    if (isAiRoute(request)) aiRequestStartedAt.set(request, Date.now());
+  });
+  app.addHook('onResponse', async (request, reply) => {
+    const startedAt = aiRequestStartedAt.get(request);
+    if (startedAt !== undefined) writeAiOperationalLog('ai_request_finished', request, { statusCode: reply.statusCode, durationMs: Date.now() - startedAt });
+  });
   void app.register(cookie);
   void app.register(cors, {
     credentials: true, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -299,15 +319,18 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   void app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024, files: 1, fields: 4 } });
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof AppError) {
+      if (isAiRoute(request)) writeAiOperationalLog('ai_request_failed', request, { statusCode: error.statusCode, code: error.code, retryable: error.retryable });
       return reply.code(error.statusCode).send(errorBody(request, error.code, error.message));
     }
     const statusCode = typeof (error as { statusCode?: unknown }).statusCode === 'number' ? (error as { statusCode: number }).statusCode : 500;
     if (statusCode >= 400 && statusCode < 500) {
       const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : 'REQUEST_ERROR';
       const message = error instanceof Error && error.message.trim() ? error.message : 'Yêu cầu không hợp lệ.';
+      if (isAiRoute(request)) writeAiOperationalLog('ai_request_failed', request, { statusCode, code, retryable: false });
       return reply.code(statusCode).send(errorBody(request, code, message));
     }
-    console.error({ requestId: request.id, code: 'INTERNAL_ERROR' });
+    if (isAiRoute(request)) writeAiOperationalLog('ai_request_failed', request, { statusCode: 500, code: 'INTERNAL_ERROR', retryable: false });
+    else console.error({ requestId: request.id, code: 'INTERNAL_ERROR' });
     return reply.code(500).send(errorBody(request, 'INTERNAL_ERROR', 'Hệ thống gặp lỗi không mong muốn. Vui lòng thử lại.'));
   });
 

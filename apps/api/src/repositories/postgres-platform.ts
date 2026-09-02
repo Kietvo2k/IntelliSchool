@@ -48,6 +48,7 @@ import {
   type ChatCitation,
 } from '../domain/ai/chat.js';
 import { AptitudeEssayOutputSchema, InterviewTurnOutputSchema, TeacherComposeOutputSchema } from '../domain/ai/structured.js';
+import { buildAiAuditMetadata } from '../domain/ai/audit.js';
 import { decideAiJobFailure, normalizeAiJobRole } from '../domain/ai/jobs.js';
 import type { AuthContext, Role } from '../types.js';
 import type {
@@ -465,8 +466,8 @@ export class PostgresPlatformRepository implements PlatformRepository {
       AND ($4::timestamptz IS NULL OR ae.created_at >= $4::timestamptz)
       AND ($5::timestamptz IS NULL OR ae.created_at <= $5::timestamptz)
     `;
-    const result = await this.options.controlPool.query<{ id: string; action: string; target_type: string; target_id: string | null; actor_display_name: string; actor_email: string; school_name: string | null; created_at: Date }>(`
-      SELECT ae.id, ae.action, ae.target_type, ae.target_id,
+    const result = await this.options.controlPool.query<{ id: string; action: string; target_type: string; target_id: string | null; metadata: unknown; actor_display_name: string; actor_email: string; school_name: string | null; created_at: Date }>(`
+      SELECT ae.id, ae.action, ae.target_type, ae.target_id, ae.metadata,
              u.display_name AS actor_display_name, u.email::text AS actor_email,
              s.name AS school_name, ae.created_at
       FROM audit_events ae
@@ -481,7 +482,7 @@ export class PostgresPlatformRepository implements PlatformRepository {
     `, values);
     const totalItems = numeric(total.rows[0]?.count);
     return {
-      items: result.rows.map((row) => ({ id: row.id, action: row.action, targetType: row.target_type, targetId: row.target_id, actorDisplayName: row.actor_display_name, actorEmail: row.actor_email, schoolName: row.school_name, createdAt: row.created_at.toISOString() })),
+      items: result.rows.map((row) => ({ id: row.id, action: row.action, targetType: row.target_type, targetId: row.target_id, metadata: jsonRecord(row.metadata), actorDisplayName: row.actor_display_name, actorEmail: row.actor_email, schoolName: row.school_name, createdAt: row.created_at.toISOString() })),
       page: input.page, pageSize: input.pageSize, totalItems, totalPages: Math.ceil(totalItems / input.pageSize),
     };
   }
@@ -977,7 +978,20 @@ export class PostgresPlatformRepository implements PlatformRepository {
       `, [schoolId, actor.userId, JSON.stringify({ answers, essayScores }), JSON.stringify(scores)]);
       await client.query('INSERT INTO career_profiles (user_id, school_id) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET updated_at = now()', [actor.userId, schoolId]);
       await client.query("DELETE FROM career_assessment_drafts WHERE school_id = $1 AND user_id = $2 AND assessment_kind = 'APTITUDE'", [schoolId, actor.userId]);
-      await this.audit(client, schoolId, actor.userId, 'CAREER_APTITUDE_COMPLETED', 'career_assessment', inserted.rows[0]!.id, {});
+      await this.audit(client, schoolId, actor.userId, 'CAREER_APTITUDE_COMPLETED', 'career_assessment', inserted.rows[0]!.id, buildAiAuditMetadata({
+        operation: 'APTITUDE_ESSAY',
+        purpose: 'APTITUDE',
+        status: 'COMPLETED',
+        provider: aiProviderName,
+        requestedModel: aiRequestedModel ?? aiUsedModel,
+        usedModel: aiUsedModel,
+        executionMode: essayItems.length > 0 ? 'MODEL' : 'NONE',
+        isFallback: false,
+        inputTokens: aiInputTokens,
+        outputTokens: aiOutputTokens,
+        estimatedCostVnd: aiEstimatedCostVnd,
+        requestId,
+      }));
       if (essayItems.length > 0) {
         await client.query(`INSERT INTO ai_usage_logs (school_id, user_id, model_id, operation, input_tokens, output_tokens, estimated_cost_vnd, provider, requested_model, used_model, is_fallback, request_id)
           VALUES ($1, $2, (SELECT id FROM ai_models WHERE school_id = $1 AND is_enabled = true ORDER BY CASE tier WHEN 'CLOUD' THEN 0 WHEN 'LOCAL_QUALITY' THEN 1 ELSE 2 END LIMIT 1), 'APTITUDE_ESSAY', $3, $4, $5, $6, $7, $8, false, $9)`, [schoolId, actor.userId, aiInputTokens, aiOutputTokens, aiEstimatedCostVnd, aiProviderName, aiRequestedModel ?? aiUsedModel, aiUsedModel, requestId]);
@@ -3148,6 +3162,23 @@ export class PostgresPlatformRepository implements PlatformRepository {
       for (const run of toolRuns) await client.query('INSERT INTO ai_tool_runs (school_id, session_id, tool_name, input, output, status) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)', [schoolId, sessionId, run.name, JSON.stringify({ code: Boolean(codeFence) }), JSON.stringify(run), run.error ? 'error' : 'ok']);
       if (executionMode === 'MODEL') await client.query(`INSERT INTO ai_usage_logs (school_id, user_id, model_id, operation, input_tokens, output_tokens, estimated_cost_vnd, provider, requested_model, used_model, is_fallback, job_id, request_id)
         VALUES ($1, $2, $3, 'CHAT', $4, $5, $6, $7, $8, $9, false, $10, $11)`, [schoolId, actor.userId, runtimeModel.id, inputTokens, outputTokens, estimatedCostVnd, provider?.kind ?? null, runtimeModel.model_name, usedModel, jobId ?? null, requestId]);
+      await this.audit(client, schoolId, actor.userId, 'AI_CHAT_COMPLETED', 'ai_request', requestId, buildAiAuditMetadata({
+        operation: 'CHAT',
+        purpose: input.purpose ?? 'ASSISTANT',
+        status: 'COMPLETED',
+        provider: executionMode === 'MODEL' ? provider?.kind ?? null : null,
+        requestedModel: executionMode === 'MODEL' ? runtimeModel.model_name : null,
+        usedModel,
+        executionMode,
+        isFallback: false,
+        inputTokens,
+        outputTokens,
+        estimatedCostVnd,
+        citationsCount: citations.length,
+        toolCount: toolRuns.length,
+        requestId,
+        jobId: jobId ?? null,
+      }));
       const tokenRow = await client.query<{ token_count: number }>('SELECT COALESCE(token_count, 0)::int AS token_count FROM ai_sessions WHERE id = $1', [sessionId]);
       return { sessionId, messageId: assistant.rows[0]!.id, createdAt: assistant.rows[0]!.created_at.toISOString(), overflow, tokenCount: tokenRow.rows[0]?.token_count ?? added };
     }));
@@ -3182,6 +3213,13 @@ export class PostgresPlatformRepository implements PlatformRepository {
         [schoolId, actor.userId, input.sessionId ?? null, JSON.stringify(input), requestId],
       );
       created = true;
+      await this.audit(client, schoolId, actor.userId, 'AI_JOB_CREATED', 'ai_job', inserted.rows[0]!.id, buildAiAuditMetadata({
+        operation: 'JOB',
+        purpose: input.purpose ?? 'PERSONAL_STUDY',
+        status: 'CREATED',
+        requestId,
+        jobId: inserted.rows[0]!.id,
+      }));
       return { jobId: inserted.rows[0]!.id, status: 'QUEUED', stage: 'QUEUED', progress: 0, requestId, createdAt: inserted.rows[0]!.created_at.toISOString() };
     }));
     const result = job as { jobId?: string };
@@ -3251,6 +3289,27 @@ export class PostgresPlatformRepository implements PlatformRepository {
             metadata?.isFallback ?? null, metadata?.inputTokens ?? null, metadata?.outputTokens ?? null,
             metadata?.estimatedCostVnd ?? null, metadata?.toolTrace === undefined ? null : JSON.stringify(metadata.toolTrace), actor.userId],
         );
+        const auditStatus = status === 'COMPLETED' || status === 'FAILED' || status === 'CANCELLED' ? status : null;
+        if (auditStatus) {
+          await this.audit(client, schoolId, actor.userId, `AI_JOB_${auditStatus}`, 'ai_job', jobId, buildAiAuditMetadata({
+            operation: 'JOB',
+            purpose: input.purpose ?? 'PERSONAL_STUDY',
+            status: auditStatus,
+            stage,
+            errorCode: errorMessage ?? null,
+            provider: metadata?.provider ?? null,
+            requestedModel: metadata?.requestedModel ?? null,
+            usedModel: metadata?.usedModel ?? null,
+            executionMode: metadata ? 'MODEL' : 'UNAVAILABLE',
+            isFallback: metadata?.isFallback ?? false,
+            inputTokens: metadata?.inputTokens ?? 0,
+            outputTokens: metadata?.outputTokens ?? 0,
+            estimatedCostVnd: metadata?.estimatedCostVnd ?? 0,
+            toolCount: metadata?.toolTrace?.length ?? 0,
+            requestId: persistedRequestId,
+            jobId,
+          }));
+        }
       });
     };
     try {
@@ -3342,7 +3401,15 @@ export class PostgresPlatformRepository implements PlatformRepository {
         if (!current.rows[0]) throw notFound('Không tìm thấy AI job.');
         return { jobId, status: current.rows[0].status, stage: current.rows[0].stage, progress: numeric(current.rows[0].progress), requestId: current.rows[0].request_id };
       }
-      await this.audit(client, schoolId, actor.userId, 'AI_JOB_CANCELLED', 'ai_job', jobId, { requestId });
+      await this.audit(client, schoolId, actor.userId, 'AI_JOB_CANCELLED', 'ai_job', jobId, buildAiAuditMetadata({
+        operation: 'JOB',
+        status: 'CANCELLED',
+        stage: 'CANCELLED',
+        errorCode: 'AI_JOB_CANCELLED',
+        executionMode: 'MODEL',
+        requestId,
+        jobId,
+      }));
       return { jobId, status: 'CANCELLED', stage: 'CANCELLED', progress: 100, requestId };
     }));
     if ((result as { status?: string }).status === 'CANCELLED') this.activeAiJobControllers.get(jobId)?.abort();
@@ -3877,6 +3944,20 @@ export class PostgresPlatformRepository implements PlatformRepository {
       `, [schoolId, actor.userId, JSON.stringify(agentTypes), JSON.stringify(analysis), analysis.isFallback]);
       await client.query(`INSERT INTO ai_usage_logs (school_id, user_id, model_id, operation, input_tokens, output_tokens, estimated_cost_vnd, provider, requested_model, used_model, is_fallback, request_id)
         VALUES ($1, $2, $3, 'CAREER_ANALYSIS', $4, $5, $6, $7, $8, $9, false, $10)`, [schoolId, actor.userId, context.model?.id ?? null, analysis.usage.inputTokens, analysis.usage.outputTokens, estimateCostVnd(analysis.usage.inputTokens, analysis.usage.outputTokens, { inputVndPer1k: context.model?.input_vnd_per_1k ?? 0, outputVndPer1k: context.model?.output_vnd_per_1k ?? 0 }), analysis.provider, context.model?.model_name ?? analysis.usedModel, analysis.usedModel, requestId]);
+      await this.audit(client, schoolId, actor.userId, 'AI_CAREER_ANALYSIS_COMPLETED', 'career_analysis', inserted.rows[0]!.id, buildAiAuditMetadata({
+        operation: 'CAREER_ANALYSIS',
+        purpose: 'CAREER_ANALYSIS',
+        status: 'COMPLETED',
+        provider: analysis.provider,
+        requestedModel: context.model?.model_name ?? analysis.usedModel,
+        usedModel: analysis.usedModel,
+        executionMode: 'MODEL',
+        isFallback: false,
+        inputTokens: analysis.usage.inputTokens,
+        outputTokens: analysis.usage.outputTokens,
+        estimatedCostVnd: estimateCostVnd(analysis.usage.inputTokens, analysis.usage.outputTokens, { inputVndPer1k: context.model?.input_vnd_per_1k ?? 0, outputVndPer1k: context.model?.output_vnd_per_1k ?? 0 }),
+        requestId,
+      }));
       await this.upsertLearnerKb(client, schoolId, actor.userId, actor.displayName);
       return { id: inserted.rows[0]!.id, createdAt: inserted.rows[0]!.created_at.toISOString(), ...analysis };
     }));

@@ -44,10 +44,14 @@ const platformRepository = new PostgresPlatformRepository({
   crawlAllowlist: new Set((process.env.PLATFORM_CRAWL_ALLOWLIST ?? '').split(',').map((hostName) => hostName.trim().toLowerCase()).filter(Boolean)),
 });
 await platformRepository.backfillExamSnapshots();
-void platformRepository.recoverPendingAiJobs().catch(() => undefined);
-const aiRecoveryTimer = setInterval(() => { void platformRepository.recoverPendingAiJobs().catch((error) => console.error(error)); }, 15_000);
+const logBackgroundFailure = (event: string, error: unknown): void => {
+  const typed = error as { code?: unknown; message?: unknown };
+  console.error(JSON.stringify({ event, errorCode: typeof typed.code === 'string' ? typed.code : 'UNKNOWN', message: typeof typed.message === 'string' ? typed.message : 'Tác vụ nền thất bại.' }));
+};
+void platformRepository.recoverPendingAiJobs().catch((error) => logBackgroundFailure('ai_recovery_failed', error));
+const aiRecoveryTimer = setInterval(() => { void platformRepository.recoverPendingAiJobs().catch((error) => logBackgroundFailure('ai_recovery_failed', error)); }, 15_000);
 aiRecoveryTimer.unref();
-const examFinalizerTimer = setInterval(() => { void platformRepository.finalizeExpiredExamSessions().catch((error) => console.error(error)); }, 5_000);
+const examFinalizerTimer = setInterval(() => { void platformRepository.finalizeExpiredExamSessions().catch((error) => logBackgroundFailure('exam_finalizer_failed', error)); }, 5_000);
 examFinalizerTimer.unref();
 const resourceRepository = new PostgresResourceRepository(createPool(apiDatabaseUrl));
 const resourceStorage = createResourceStorage();

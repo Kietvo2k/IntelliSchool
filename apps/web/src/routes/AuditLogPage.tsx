@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Pagination } from '../components/Pagination.js';
 import { apiRequest, ApiRequestError } from '../lib/api.js';
+import { formatAiAuditMetadata } from './audit-display.js';
 
 interface AuditEventView {
   id: string;
@@ -9,6 +10,7 @@ interface AuditEventView {
   actorDisplayName: string;
   actorEmail: string;
   schoolName: string | null;
+  metadata?: Record<string, unknown>;
   createdAt: string;
 }
 interface AuditPage { items: AuditEventView[]; totalItems: number; totalPages: number; }
@@ -87,7 +89,7 @@ export function AuditLogPage() {
       <table><thead><tr><th scope="col">Thời điểm</th><th scope="col">Hành động</th><th scope="col">Người thực hiện</th><th scope="col">Phạm vi</th></tr></thead>
         <tbody>{events.map((event) => <tr key={event.id}>
           <td>{new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(event.createdAt))}</td>
-          <td><strong>{displayAction(event.action)}</strong><small>{event.targetType}</small></td>
+          <td><strong>{displayAction(event.action)}</strong><small>{event.targetType}</small>{formatAiAuditMetadata(event.metadata) && <small>{formatAiAuditMetadata(event.metadata)}</small>}</td>
           <td>{event.actorDisplayName}<small>{event.actorEmail}</small></td>
           <td>{event.schoolName ?? 'Nền tảng'}</td>
         </tr>)}</tbody>

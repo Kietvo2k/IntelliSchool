@@ -34,6 +34,11 @@ extractive fallback trên production path. Khi provider unavailable, API trả
 `503 AI_UNAVAILABLE` (policy refusal là trường hợp không tạo nội dung model) và UI
 phải nói rõ chưa cấu hình/không reachable, không tạo kết quả giả.
 
+Mọi request AI có log JSON backend gồm event, route, status, duration và requestId.
+Các capability đã hoàn tất và Thinking job ghi audit event để Platform Admin xem trong
+`/app/audit-log`; metadata chỉ gồm provider/model/usage/trạng thái/requestId, không gồm
+prompt, nội dung trả lời đầy đủ, API key hoặc secret.
+
 Structured output của teacher compose, career analysis, aptitude essay và interview
 được parse rồi validate bằng Zod; JSON/schema lỗi là `502 AI_OUTPUT_INVALID` và không
 được lưu như kết quả hợp lệ. RAG citation phải tham chiếu số citation thực tế; thiếu

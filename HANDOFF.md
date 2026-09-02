@@ -80,3 +80,19 @@
   full live batch có transient rate-limit nên release script tách từng capability process.
 - Commit hash: xem hash commit hiện tại trong `git log -1 --format=%H`; giá trị được
   ghi nhận trong bàn giao sau commit để tránh tự tham chiếu hash của chính commit.
+
+## Cập nhật vận hành local AI và log admin — 2026-09-02
+
+- Không reset database. Persistent PostgreSQL volume đã được bổ sung migration
+  `021_async_job_reliability.sql`; các cột retry/lease/provider/usage và index claim
+  đã được kiểm tra lại trực tiếp.
+- `.env` local dùng provider OpenAI-compatible VietAPI, model `deepseek-v4-flash`,
+  HTTPS allowlist và timeout 60 giây; API key test chỉ nằm ở server environment.
+  Keyring snapshot local dùng file `/data/exam-keyring.json` với version đang tồn tại.
+- Backend phát JSON log cho request AI với event, route, status, duration và requestId;
+  không ghi prompt, output đầy đủ hay secret. Admin có thể xem bằng chứng AI trong
+  `/app/audit-log`, gồm chat, career, aptitude và Thinking job với provider/model/token.
+- Bằng chứng thực tế: UI chat grounded thành công có citation; Thinking hoàn tất 100%;
+  live backend pass 4/4 capability; `npm run verify` pass với API 227 test và web 60 test.
+- Container hiện chạy tại `http://127.0.0.1:5176/`; không dùng `--remove-orphans` và
+  không xóa container volume `smartclass-platform_app-data` để bảo toàn dữ liệu local.
