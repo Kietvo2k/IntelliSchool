@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AnthropicProvider, buildProviderStatus, createAiProvider, OpenAiCompatibleProvider, providerFromModel, validateProviderEndpoint } from '../src/services/ai/providers.js';
+import { AnthropicProvider, buildProviderStatus, createAiProvider, envMaxOutputTokens, envTimeoutMs, OpenAiCompatibleProvider, providerFromModel, validateProviderEndpoint } from '../src/services/ai/providers.js';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; vi.restoreAllMocks(); });
@@ -117,5 +117,11 @@ describe('AI provider adapters', () => {
       model: 'gpt',
       checkedAt: '2026-09-02T00:00:00.000Z',
     });
+  });
+
+  it('allows generous response settings while retaining bounded safety caps', () => {
+    expect(envTimeoutMs({ AI_TIMEOUT_MS: '999999' })).toBe(120_000);
+    expect(envMaxOutputTokens({ AI_MAX_OUTPUT_TOKENS: '4000' })).toBe(4_000);
+    expect(envMaxOutputTokens({ AI_MAX_OUTPUT_TOKENS: '999999' })).toBe(12_000);
   });
 });

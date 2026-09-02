@@ -8,6 +8,7 @@ import { presentAssistantText } from '../lib/present-assistant.js';
 import { useSession } from '../lib/SessionContext.js';
 import { STUDY_CHAT_DEFAULTS } from './ai-study-defaults.js';
 import './ai-study.css';
+import { visibleAiStudyNotice } from './ai-study-notice.js';
 
 interface Citation { documentId: string; documentTitle: string; chunkId: string; ordinal: number; score: number; snippet: string }
 interface ChatReply {
@@ -22,18 +23,11 @@ interface ChatReply {
   overflow?: boolean;
   tokenCount?: number;
   tokenLimit?: number;
-  toolRuns?: Array<{ name: string; status?: 'COMPLETED' | 'FAILED' }>;
   message: { id: string; role: 'ASSISTANT'; content: string; citations: Citation[]; createdAt: string };
 }
 interface RagDoc { id: string; title: string; status: string }
 interface LessonOption { id: string; title: string }
 interface ResourceOption { id: string; title?: string; originalName?: string; status?: string }
-
-const MODE_LABEL: Record<ChatReply['mode'], string> = {
-  GROUNDED: 'Dựa trên tài liệu của trường',
-  GENERAL: 'Kiến thức chung (không trích từ tài liệu trường)',
-  REFUSED: 'Từ chối theo chính sách học tập',
-};
 
 export function AiAssistantPage() {
   const { user } = useSession();
@@ -56,7 +50,6 @@ export function AiAssistantPage() {
   const [tokenLimit, setTokenLimit] = useState(128_000);
   const [runCode, setRunCode] = useState(false);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const [toolRuns, setToolRuns] = useState<ChatReply['toolRuns']>([]);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   async function loadSessions() {
@@ -108,7 +101,6 @@ export function AiAssistantPage() {
 
   async function openSession(id: string) {
     setSessionId(id);
-    setToolRuns([]);
     try {
       const rows = await apiRequest<Array<{ id: string; role: 'USER' | 'ASSISTANT'; content: string; citations?: Citation[] }>>(`/api/v1/ai/sessions/${id}/messages`);
       setMessages((rows ?? []).map((row) => ({
@@ -125,7 +117,6 @@ export function AiAssistantPage() {
   function newSession() {
     setSessionId(null);
     setMessages([]);
-    setToolRuns([]);
     setTokenCount(0);
     setNotice('');
   }
@@ -155,17 +146,13 @@ export function AiAssistantPage() {
       setSessionId(reply.sessionId);
       setTokenCount(reply.tokenCount ?? 0);
       setTokenLimit(reply.tokenLimit ?? 128_000);
-      setToolRuns(reply.toolRuns ?? []);
       setMessages((prev) => [...prev, {
         id: reply.message.id,
         role: 'ASSISTANT',
         content: presentAssistantText(learner ? 'PERSONAL_STUDY' : 'ASSISTANT', reply.message.content),
         citations: reply.message.citations,
       }]);
-      const evidence = reply.executionMode === 'MODEL'
-        ? [`Provider: ${reply.provider ?? 'unknown'}`, `Model: ${reply.usedModel ?? 'unknown'}`, `Token: ${reply.usage.inputTokens + reply.usage.outputTokens}`, `Request: ${reply.requestId}`]
-        : ['AI chưa khả dụng'];
-      setNotice([MODE_LABEL[reply.mode], ...evidence, reply.notice, reply.overflow ? 'Đã mở phiên mới vì đầy ngữ cảnh.' : null].filter(Boolean).join(' · '));
+      setNotice(visibleAiStudyNotice(reply));
       await loadSessions();
     } catch (error) {
       setNotice(error instanceof ApiRequestError ? error.message : 'Chưa gửi được câu hỏi.');
@@ -236,14 +223,6 @@ export function AiAssistantPage() {
         placeholder="Nhập câu hỏi học tập…"
         submitLabel="Gửi câu hỏi"
         banner={banner}
-        toolBlocks={toolRuns && toolRuns.length > 0 ? (
-          <div className="tool-run" role="status">
-            <p className="eyebrow">Kết quả chạy</p>
-            {toolRuns.map((run, index) => (
-              <p key={`${run.name}-${index}`}>{run.name} · {run.status === 'FAILED' ? 'Không hoàn tất' : 'Đã hoàn tất'}</p>
-            ))}
-          </div>
-        ) : null}
         footerNote={activeJobId ? <button type="button" className="button button-quiet text-xs" onClick={() => void cancelThinking()}>Hủy Thinking</button> : undefined}
         onAttachFile={attachFile}
         attachments={attachments}

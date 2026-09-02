@@ -31,7 +31,7 @@ import { estimateAdmissionProbability } from '../domain/career/admission.js';
 import { matchScholarships, type ScholarshipCriteria } from '../domain/career/scholarship.js';
 import { presentAssistantText } from '../domain/ai/present.js';
 import { extractJsCodeFence, runSandboxedJs } from '../domain/ai/sandbox.js';
-import { AiProviderError, buildProviderStatus, checkAiProvider, chatWithProvider, providerFromModel, validateProviderEndpoint } from '../services/ai/providers.js';
+import { AiProviderError, buildProviderStatus, checkAiProvider, chatWithProvider, envMaxOutputTokens, providerFromModel, validateProviderEndpoint } from '../services/ai/providers.js';
 import { chatWithStructured } from '../services/ai/structured-call.js';
 import { chunkText, extractLessonText, localEmbed, rankChunks, EMBEDDING_DIM } from '../domain/ai/rag.js';
 import { STUDY_RAG_SOURCE_KINDS } from '../domain/ai/rag-source-policy.js';
@@ -3082,7 +3082,14 @@ export class PostgresPlatformRepository implements PlatformRepository {
         : `${buildUserPrompt(guard.sanitized, citations)}${interviewContext ? `\n${interviewContext}` : ''}${toolNote}${historyBlock ? `\nLịch sử gần đây:\n${historyBlock}` : ''}`;
       const estInput = approximateTokens(systemPrompt + userPrompt);
       const pricing = { inputVndPer1k: runtimeModel.input_vnd_per_1k, outputVndPer1k: runtimeModel.output_vnd_per_1k };
-      const estimatedOutputTokens = input.purpose === 'TEACHER_COMPOSE' ? 1_400 : input.reasoningMode === 'THINKING' ? 1_400 : 800;
+      const outputTokenLimit = input.purpose === 'TEACHER_COMPOSE'
+        ? 1_400
+        : input.purpose === 'EXTRACURRICULAR_INTERVIEW'
+          ? 800
+          : input.reasoningMode === 'THINKING'
+            ? Math.min(envMaxOutputTokens() * 2, 12_000)
+            : envMaxOutputTokens();
+      const estimatedOutputTokens = outputTokenLimit;
       const reservedAttempts = citations.length > 0 ? 2 : 1;
       const budget = checkBudget({ usedVnd: modelInfo.usedVnd, estimatedRequestVnd: estimateCostVnd(estInput * reservedAttempts, estimatedOutputTokens * reservedAttempts, pricing), limitVnd: runtimeModel.monthly_cost_limit_vnd == null ? null : numeric(runtimeModel.monthly_cost_limit_vnd) });
       if (!budget.allowed) throw new AppError(429, 'AI_BUDGET_EXCEEDED', 'Đã đạt hạn mức chi phí AI trong tháng của trường.');
@@ -3121,7 +3128,7 @@ export class PostgresPlatformRepository implements PlatformRepository {
           answer = presentInterviewTurn(JSON.stringify(result.data));
         } else {
           const messages = [{ role: 'system' as const, content: systemPrompt }, { role: 'user' as const, content: userPrompt }];
-          const options = { maxOutputTokens: input.reasoningMode === 'THINKING' ? 1_400 : 800, temperature: input.reasoningMode === 'THINKING' ? 0.2 : 0.3, timeoutMs: input.reasoningMode === 'THINKING' ? 60_000 : undefined, requestId, signal };
+          const options = { maxOutputTokens: outputTokenLimit, temperature: input.reasoningMode === 'THINKING' ? 0.2 : 0.3, requestId, signal };
           const initial = await chatWithProvider(provider!, messages, options);
           const needsCitationRepair = citations.length > 0 && !hasGroundedCitationReference(initial.text, citations.length);
           const repaired = needsCitationRepair

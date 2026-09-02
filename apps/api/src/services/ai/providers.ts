@@ -51,6 +51,11 @@ export function envTimeoutMs(env: Record<string, string | undefined> = process.e
   return Number.isFinite(raw) && raw >= 1_000 ? Math.min(raw, 120_000) : DEFAULT_TIMEOUT_MS;
 }
 
+export function envMaxOutputTokens(env: Record<string, string | undefined> = process.env): number {
+  const raw = Number(env.AI_MAX_OUTPUT_TOKENS);
+  return Number.isFinite(raw) && raw >= 256 ? Math.min(Math.floor(raw), 12_000) : 4_000;
+}
+
 function ipv4IsPrivate(address: string): boolean {
   const octets = address.split('.').map(Number);
   if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
