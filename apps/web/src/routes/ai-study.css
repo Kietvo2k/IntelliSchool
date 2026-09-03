@@ -2,21 +2,26 @@
 .workspace-main .ai-study-page .page-header--compact h1 { max-width: none; margin-bottom: .4rem; font-size: clamp(1.9rem, 3.5vw, 2.7rem); line-height: 1.1; }
 .ai-study-page .page-header--compact .page-lede { max-width: 68ch; margin: 0; font-size: .9rem; }
 .ai-study-page .ai-study-chat { width: min(100%, 88rem); max-width: 100%; min-width: 0; }
-.ai-study-page .chat-shell { min-width: 0; min-height: clamp(34rem, calc(100dvh - 12rem), 56rem); }
-.ai-study-page .chat-shell > * { min-width: 0; }
-.ai-study-page .chat-shell-main { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: .75rem; }
+.ai-study-page .chat-shell { width: 100%; min-width: 0; height: clamp(36rem, calc(100dvh - 10rem), 56rem); min-height: 0; grid-template-columns: minmax(11rem, 14rem) minmax(0, 1fr) !important; grid-template-rows: minmax(0, 1fr) !important; }
+.ai-study-page .chat-shell > * { min-width: 0; min-height: 0; grid-column: auto !important; }
+.ai-study-page .chat-shell-sessions { min-width: 0; max-height: none; overflow: hidden; }
+.ai-study-page .chat-shell-sessions > :first-child { min-height: 0; overflow: hidden; }
+.ai-study-page .chat-shell-sessions ul { max-height: 12rem; overflow-y: auto; }
+.ai-study-page .chat-shell-main { min-width: 0; min-height: 0; height: 100%; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: .75rem; overflow: hidden; }
 .ai-study-page .chat-shell-main > :first-child { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: .75rem; overflow: hidden; }
 .ai-study-page .chat-shell-main > :first-child > * { margin-top: 0 !important; }
-.ai-study-page .chat-thread-log { flex: 1 1 auto; min-width: 0; min-height: 0; height: 100%; max-width: 100%; max-height: none; overflow-x: hidden; }
+.ai-study-page .chat-thread-log { flex: 1 1 auto; min-width: 0; min-height: 12rem; height: 100%; max-width: 100%; max-height: none; overflow-x: hidden; }
 .ai-study-page .chat-bubble, .ai-study-page .chat-bubble * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .ai-study-page .chat-bubble pre, .ai-study-page .chat-bubble table { overflow-x: auto; }
+.ai-study-page .chat-composer textarea { min-height: 4.5rem; max-height: 12rem; }
 .ai-study-page .workspace-feature.ai-context-panel { padding: .2rem 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .ai-study-page .ai-context-panel > h2, .ai-study-page .ai-context-panel > .muted-copy { display: none; }
 .ai-study-page .ai-context-panel .ai-context-advanced { margin: 0; }
 .ai-study-page .ai-context-panel .ai-context-advanced summary { min-height: 36px; display: inline-flex; align-items: center; }
 
 @media (max-width: 800px) {
-  .ai-study-page .chat-shell { min-height: calc(100dvh - 8rem); }
+  .ai-study-page .chat-shell { height: calc(100dvh - 8rem); min-height: 34rem; grid-template-columns: minmax(0, 1fr) !important; grid-template-rows: auto minmax(0, 1fr) !important; }
   .ai-study-page .chat-shell-sessions { max-height: 8.5rem; }
+  .ai-study-page .chat-shell-sessions ul { max-height: 6.5rem; }
   .ai-study-page .chat-shell-main { padding: .75rem; }
 }
