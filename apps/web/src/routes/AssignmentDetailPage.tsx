@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { AssistantRichText } from '../components/ui/AssistantRichText.js';
 import { ChatThread, type ChatBubble } from '../components/ui/ChatThread.js';
 import { EmptyState, ErrorState } from '../components/ui/EmptyState.js';
 import { FormField, SelectInput, TextArea, TextInput } from '../components/ui/FormField.js';
@@ -156,7 +157,17 @@ function EducatorComposer({
       const reply = await apiRequest<{ sessionId: string; message: { id: string; content: string; raw?: string } }>('/api/v1/ai/chat', {
         method: 'POST',
         idempotencyKey: newIdempotencyKey('compose-chat'),
-        body: { message: text, sessionId: composeSession, purpose: 'TEACHER_COMPOSE', classId: classId || null, subjectId: subjectId || null },
+        body: {
+          message: text,
+          sessionId: composeSession,
+          purpose: 'TEACHER_COMPOSE',
+          classId: classId || null,
+          subjectId: subjectId || null,
+          reasoningMode: 'STANDARD',
+          agentic: true,
+          runCode: true,
+          sourceMode: 'AUTO',
+        },
       });
       setComposeSession(reply.sessionId);
       setComposeMessages((current) => [...current, { id: reply.message.id, role: 'ASSISTANT', content: presentAssistantText('TEACHER_COMPOSE', reply.message.content) }]);
@@ -348,9 +359,9 @@ function EducatorComposer({
             return (
               <article key={index} className="compose-card">
                 <p className="eyebrow">{String(question.type ?? 'Câu hỏi')} · {index + 1}</p>
-                <p>{prompt.text || 'Câu hỏi đã điền khung'}</p>
+                <AssistantRichText content={prompt.text || 'Câu hỏi đã điền khung'} />
                 {Array.isArray(prompt.choices) && (
-                  <ol>{prompt.choices.map((choice) => <li key={choice}>{choice}</li>)}</ol>
+                  <ol>{prompt.choices.map((choice) => <li key={choice}><AssistantRichText content={choice} /></li>)}</ol>
                 )}
               </article>
             );
