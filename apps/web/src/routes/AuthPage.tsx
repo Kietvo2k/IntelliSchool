@@ -51,7 +51,7 @@ export function AuthPage({ onAuthenticated }: { onAuthenticated: (user: SessionU
   return (
     <main className="auth-page auth-split">
       <aside className="auth-story">
-        <Link className="brand auth-link" to="/" aria-label="Về trang chủ Smart Path Platform">
+        <Link className="brand auth-link" to="/" aria-label="Về trang chủ IntelliSchool">
           <BrandLogo size="md" subtitle="Nền tảng trường số" />
         </Link>
         <MotionReveal tone="landing" index={0}>

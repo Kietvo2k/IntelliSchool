@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Home } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { BrandLogo } from '../components/BrandLogo.js';
 import { CbtBackdrop } from '../components/ui/CbtBackdrop.js';
@@ -46,7 +47,8 @@ interface SessionPaper {
   lockedAt?: string | null;
   cameraRequired?: boolean;
   integrityMode?: 'PRACTICE' | 'STRICT_WEB';
-  integrityPolicy?: { maxIncidents: number; graceMs: number; attachmentExemptionSeconds: number; fullscreenRequired: boolean };
+  integrity?: { state: 'ACTIVE' | 'GRACE' | 'WARNING' | 'LOCKED'; incidentId: string | null; graceEndsAt: string | null; lockAt: string | null; remainingMs: number; lockedAt: string | null; serverNow: string };
+  integrityPolicy?: { graceMs: number; lockMs: number; attachmentExemptionSeconds: number; fullscreenRequired: boolean };
   showScoreOnSubmit: boolean;
   items: PaperItem[];
 }
@@ -71,7 +73,13 @@ function passageImageSrc(prompt: PaperItem['prompt']): string | null {
 function CbtHeader({ school }: { school: string }) {
   return (
     <header className="cbt-top">
-      <p className="cbt-top-title">GIAO DIỆN THI TRÊN MÁY TÍNH</p>
+      <div className="cbt-header-left">
+        <a href="/app" className="cbt-home-link" title="Về trang chủ">
+          <Home size={18} aria-hidden="true" />
+          <span>Về trang chủ</span>
+        </a>
+        <p className="cbt-top-title">GIAO DIỆN THI TRÊN MÁY TÍNH</p>
+      </div>
       <div className="cbt-header-brand">
         <BrandLogo size="sm" subtitle={school} />
       </div>
@@ -97,13 +105,14 @@ export function ExamRoomPage() {
   const [zoom, setZoom] = useState(100);
   const [showPin, setShowPin] = useState(false);
   const [connected, setConnected] = useState(true);
-  const [integrityStrikeCount, setIntegrityStrikeCount] = useState(0);
+  const [integrityState, setIntegrityState] = useState<'ACTIVE' | 'GRACE' | 'WARNING' | 'LOCKED'>('ACTIVE');
   const pinRef = useRef('');
   const codeRef = useRef('');
   const answers = useRef<Record<string, Record<string, unknown>>>({});
   const lastIntegrityAt = useRef(0);
   const attachmentPickerActive = useRef(false);
   const attachmentExemptionToken = useRef<string | null>(null);
+  const integrityIncidentId = useRef<string | null>(null);
 const fullscreenExitTimer = useRef<number | null>(null);
 const submitInFlight = useRef(false);
 
@@ -193,7 +202,7 @@ const submit = useCallback(async (): Promise<boolean> => {
         body: { assignmentId, studentCode: codeRef.current || lobby?.studentCode, pin: pinRef.current },
       });
       const session = await apiRequest<SessionPaper>(`/api/v1/exams/sessions/${started.sessionId}`);
-      if (session.lockedAt) { setMessage('Ca thi đã khóa sau 3 lần rời trang.'); return; }
+      if (session.lockedAt || session.integrity?.state === 'LOCKED') { setIntegrityState('LOCKED'); setMessage('Ca thi đã khóa do incident integrity; cần giám thị mở khóa.'); return; }
       setPaper(session);
       const serverAnswers = Object.fromEntries(session.items.map((item) => [item.id, item.answer ?? {}]));
       let localAnswers: Record<string, Record<string, unknown>> = {};
@@ -221,12 +230,12 @@ const submit = useCallback(async (): Promise<boolean> => {
       if (left === 0) void submit();
     }, 1000);
     const beat = window.setInterval(() => {
-      void apiRequest(`/api/v1/exams/sessions/${sessionId}/heartbeat`, { method: 'POST' })
+      void apiRequest(`/api/v1/exams/sessions/${sessionId}/heartbeat`, { method: 'POST', idempotencyKey: newIdempotencyKey('exam-heartbeat') })
         .then(() => setConnected(true))
         .catch(() => setConnected(false));
     }, 20000);
     const refreshAttachmentExemption = () => {
-      void apiRequest<{ token: string; expiresAt: string }>(`/api/v1/exams/sessions/${sessionId}/attachment-exemption`, { method: 'POST' })
+      void apiRequest<{ token: string; expiresAt: string }>(`/api/v1/exams/sessions/${sessionId}/attachment-exemption`, { method: 'POST', idempotencyKey: newIdempotencyKey('exam-attachment-exemption') })
         .then((grant) => { attachmentExemptionToken.current = grant.token; })
         .catch(() => { attachmentExemptionToken.current = null; });
     };
@@ -234,18 +243,17 @@ const submit = useCallback(async (): Promise<boolean> => {
     const exemptionRefresh = window.setInterval(refreshAttachmentExemption, 45_000);
     function log(kind: string, payload?: Record<string, unknown>) {
       const now = Date.now();
-      if (attachmentPickerActive.current && ['visibilitychange', 'blur', 'fullscreen_exit'].includes(kind)) return;
       if (['visibilitychange', 'blur', 'fullscreen_exit'].includes(kind) && now - lastIntegrityAt.current < 1000) return;
       if (['visibilitychange', 'blur', 'fullscreen_exit'].includes(kind)) lastIntegrityAt.current = now;
-      void apiRequest<{ locked?: boolean; strikeCount?: number; warningsRemaining?: number }>('/api/v1/exams/integrity', { method: 'POST', body: { sessionId, kind, payload } }).then(async (data) => {
-        const strikes = data.strikeCount ?? 0;
-        setIntegrityStrikeCount(strikes);
+      void apiRequest<{ state: 'ACTIVE' | 'GRACE' | 'WARNING' | 'LOCKED'; incidentId: string | null; remainingMs: number }>('/api/v1/exams/integrity', { method: 'POST', idempotencyKey: newIdempotencyKey('exam-integrity'), body: { sessionId, kind, payload, exemptionToken: attachmentExemptionToken.current ?? undefined } }).then(async (data) => {
+        setIntegrityState(data.state);
+        integrityIncidentId.current = data.incidentId;
         setConnected(true);
-      if (data.locked) {
+      if (data.state === 'LOCKED') {
           setPaper((currentPaper) => currentPaper ? { ...currentPaper, lockedAt: new Date().toISOString() } : currentPaper);
-          setMessage('Ca thi đã khóa sau 3 lần rời trang. Bài làm được giữ nguyên; em có thể nộp khi sẵn sàng hoặc chờ hết giờ.');
-        } else if (strikes > 0) {
-          setMessage(`Cảnh báo ${strikes}/3: hãy quay lại phòng thi. Còn ${data.warningsRemaining ?? Math.max(0, 3 - strikes)} lần trước khi ca thi bị khóa.`);
+          setMessage('Ca thi đã khóa do incident integrity. Bài làm được giữ nguyên; cần giám thị mở khóa.');
+        } else if (data.state === 'GRACE' || data.state === 'WARNING') {
+          setMessage(data.state === 'GRACE' ? 'Tín hiệu ngắn đang trong thời gian phục hồi.' : 'Cảnh báo integrity đang tiếp diễn; hãy quay lại phòng thi.');
         }
       }).catch(() => {
         setConnected(false);
@@ -253,20 +261,28 @@ const submit = useCallback(async (): Promise<boolean> => {
       });
     }
     function onVis() { if (document.visibilityState === 'hidden') log('visibilitychange', { state: document.visibilityState }); }
-    function onBlur() { setMessage('Cửa sổ vừa mất focus. Nếu em vẫn đang làm bài, hãy quay lại cửa sổ thi; sự kiện này không tự nộp bài.'); }
+    function onBlur() { log('blur'); setMessage('Cửa sổ vừa mất focus. Nếu em vẫn đang làm bài, hãy quay lại cửa sổ thi; sự kiện này không tự nộp bài.'); }
     function onFull() {
       if (document.fullscreenElement) {
         if (fullscreenExitTimer.current !== null) window.clearTimeout(fullscreenExitTimer.current);
         fullscreenExitTimer.current = null;
+        if (integrityIncidentId.current) {
+          void apiRequest(`/api/v1/exams/sessions/${sessionId}/integrity/restore`, { method: 'POST', idempotencyKey: newIdempotencyKey('exam-integrity-restore'), body: { incidentId: integrityIncidentId.current } }).then(() => { integrityIncidentId.current = null; setIntegrityState('ACTIVE'); }).catch(() => undefined);
+        }
         return;
       }
       if (attachmentPickerActive.current) return;
       fullscreenExitTimer.current = window.setTimeout(() => {
-        if (!document.fullscreenElement && !attachmentPickerActive.current) setMessage('Toàn màn hình đã tắt. Hãy bấm “Toàn màn hình” để khôi phục; việc này không tự nộp bài.');
+        if (!document.fullscreenElement && !attachmentPickerActive.current) { log('fullscreen_exit'); setMessage('Toàn màn hình đã tắt. Hãy bấm “Toàn màn hình” để khôi phục; việc này không tự nộp bài.'); }
         fullscreenExitTimer.current = null;
       }, 2_000);
     }
-    function clearAttachmentPicker() { attachmentPickerActive.current = false; }
+    function clearAttachmentPicker() {
+      attachmentPickerActive.current = false;
+      if (integrityIncidentId.current) {
+        void apiRequest(`/api/v1/exams/sessions/${sessionId}/integrity/restore`, { method: 'POST', idempotencyKey: newIdempotencyKey('exam-integrity-restore'), body: { incidentId: integrityIncidentId.current } }).then(() => { integrityIncidentId.current = null; setIntegrityState('ACTIVE'); }).catch(() => undefined);
+      }
+    }
     function block(event: Event) { event.preventDefault(); log('clipboard'); }
     document.addEventListener('visibilitychange', onVis);
     window.addEventListener('blur', onBlur);
@@ -436,7 +452,7 @@ const submit = useCallback(async (): Promise<boolean> => {
         {stage === 'taking' && paper && item && (
           <motion.div key="taking" className="cbt-taking" {...fade}>
             <div className="cbt-infobar">
-               <p>{lobby?.displayName} · {lobby?.studentCode} · {paper.subjectName} · {integrityStrikeCount}/3 cảnh báo</p>
+               <p>{lobby?.displayName} · {lobby?.studentCode} · {paper.subjectName} · Integrity: {integrityState}</p>
               <p className={`cbt-timer${remainingMs <= 5 * 60 * 1000 ? ' is-low' : ''}`} aria-live="polite">{mm}:{ss}</p>
               <p className={connected ? 'cbt-link-ok' : 'cbt-link-bad'}>{connected ? 'Đang kết nối' : 'Mất kết nối'}</p>
               <button className="cbt-primary cbt-compact" type="button" onClick={() => void submit()}>NỘP BÀI</button>

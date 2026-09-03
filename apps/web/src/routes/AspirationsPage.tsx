@@ -67,10 +67,16 @@ export function AspirationsPage() {
 
   async function addAspiration(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const institutionMajorId = String(form.get('institutionMajorId') ?? '');
-    if (!institutionMajorId) { setMessage('Chọn một ngành để thêm nguyện vọng.'); return; }
+    if (!institutionMajorId) {
+      setState('error');
+      setMessage('Chọn một ngành để thêm nguyện vọng.');
+      return;
+    }
     await run('/api/v1/aspirations', 'aspiration-add', { institutionMajorId, note: String(form.get('note') ?? '') }, 'Đã thêm nguyện vọng.');
+    formElement.reset();
   }
 
   async function move(index: number, direction: -1 | 1) {
@@ -87,6 +93,7 @@ export function AspirationsPage() {
       const result = await apiRequest<ProbabilityResult>('/api/v1/career/admission-probability', { method: 'POST', idempotencyKey: newIdempotencyKey('prob'), body: { institutionMajorId: aspiration.institutionMajorId } });
       setProbabilities((current) => ({ ...current, [aspiration.id]: result }));
     } catch (error) {
+      setState('error');
       setMessage(error instanceof ApiRequestError ? error.message : 'Chưa thể ước tính xác suất.');
     }
   }
@@ -96,12 +103,12 @@ export function AspirationsPage() {
   return (
     <>
       <PageHeader eyebrow="Hướng nghiệp" title="Nguyện vọng của em" lede="Sắp xếp nguyện vọng theo thứ tự ưu tiên, ước tính khả năng trúng tuyển và tìm học bổng phù hợp. Mọi con số chỉ mang tính tham khảo." />
-      {message && <p className={`form-message ${state === 'error' ? 'is-error' : 'is-success'}`} role="status">{message}</p>}
+      {message && <p className={`form-message ${state === 'error' ? 'is-error' : 'is-success'}`} role={state === 'error' ? 'alert' : 'status'}>{message}</p>}
       {allRisky && <p className="form-message is-error" role="alert">Tất cả nguyện vọng hiện ở mức rủi ro cao. Em nên cân nhắc bổ sung nguyện vọng an toàn hơn.</p>}
 
       <section aria-labelledby="add-aspiration-title" className="workspace-feature">
         <h2 id="add-aspiration-title">Thêm nguyện vọng</h2>
-        <form className="login-form" onSubmit={addAspiration}>
+        <form className="login-form" onSubmit={(event) => void addAspiration(event)}>
           <label htmlFor="aspInstitution">Trường</label>
           <select id="aspInstitution" value={selectedInstitution} onChange={(event) => void loadPrograms(event.target.value)}>
             <option value="">Chọn trường</option>

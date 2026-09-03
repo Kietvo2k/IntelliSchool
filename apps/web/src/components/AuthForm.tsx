@@ -12,7 +12,7 @@ function titleFor(mode: AuthMode): string {
   if (mode === 'activate') return 'Kích hoạt tài khoản';
   if (mode === 'forgot') return 'Quên mật khẩu';
   if (mode === 'reset') return 'Đặt lại mật khẩu';
-  return 'Đăng nhập Smart Path';
+  return 'Đăng nhập IntelliSchool';
 }
 
 export function AuthForm({

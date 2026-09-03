@@ -8,9 +8,9 @@ export function UnauthorizedGuardPage({ targetPath }: { targetPath?: string }) {
   return (
     <main className="auth-page not-found-page">
       <div className="not-found-card unauthorized-card">
-        <Link className="brand auth-link" to="/" aria-label="Về trang chủ Smart Path Platform">
+        <Link className="brand auth-link" to="/" aria-label="Về trang chủ IntelliSchool">
           <span className="brand-mark"><GraduationCap aria-hidden="true" size={24} /></span>
-          <span>Smart Path Platform</span>
+          <span>IntelliSchool</span>
         </Link>
         <MotionReveal tone="landing" index={0} variant="scale-in">
           <div className="not-found-badge is-unauthorized" aria-hidden="true">

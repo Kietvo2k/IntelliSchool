@@ -49,13 +49,13 @@ export function SchoolRequestPage() {
   return (
     <main className="auth-page school-request-page">
       <div className="school-request-shell">
-        <Link className="brand auth-link" to="/" aria-label="Về trang chủ Smart Path Platform">
+        <Link className="brand auth-link" to="/" aria-label="Về trang chủ IntelliSchool">
           <BrandLogo size="md" subtitle="Nền tảng trường số" />
         </Link>
         <div className="school-request-layout">
           <aside className="school-request-story">
             <MotionReveal tone="landing" index={0}>
-              <p className="eyebrow">Mở trường trên Smart Path</p>
+              <p className="eyebrow">Mở trường trên IntelliSchool</p>
             </MotionReveal>
             <MotionReveal tone="landing" index={1} variant="clip-up">
               <h1 id="request-title">Ba bước. Form một lần. Email kích hoạt gửi hiệu trưởng.</h1>

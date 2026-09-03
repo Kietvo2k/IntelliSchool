@@ -10,23 +10,23 @@ const rooms = [
     icon: BookOpenCheck,
     title: 'Lớp học',
     tone: 'classroom',
-    text: 'Bài giảng, bài tập, sổ điểm theo môn. Giáo viên giao việc; học sinh nộp và xem điểm của mình.',
+    text: 'Bài giảng số, giao bài tập và sổ điểm thời gian thực.',
     preview: (
       <div className="bento-preview preview-classroom" aria-hidden="true">
         <div className="preview-topline">
-          <span className="preview-tag">Môn Toán · 12A1</span>
+          <span className="preview-tag">Toán 12A1</span>
           <span className="preview-status-pill">Đã nộp bài</span>
         </div>
         <div className="preview-assignment">
           <div className="assignment-info">
-            <strong>Bài tập: Khảo sát hàm số & Tích phân</strong>
-            <small>Hạn nộp: 22:00 hôm nay</small>
+            <strong>Ôn tập Hàm số & Tích phân</strong>
+            <small>Hạn: Hôm nay 22:00</small>
           </div>
           <div className="score-badge">9.5<span>/10</span></div>
         </div>
         <div className="preview-bar-group">
           <div className="preview-bar"><span style={{ width: '85%' }} /></div>
-          <div className="preview-bar-label"><span>Tiến độ lớp</span><b>28/34 học sinh</b></div>
+          <div className="preview-bar-label"><span>Tiến độ</span><b>28/34 hoàn thành</b></div>
         </div>
       </div>
     ),
@@ -35,20 +35,19 @@ const rooms = [
     icon: Compass,
     title: 'Định hướng',
     tone: 'career',
-    text: 'Trắc nghiệm RIASEC & Năng lực, tính xác suất đỗ đại học theo điểm học bạ và gợi ý học bổng 2025/2026.',
+    text: 'Trắc nghiệm SIMGR, gợi ý ngành nghề và dự báo trúng tuyển.',
     preview: (
       <div className="bento-preview preview-career" aria-hidden="true">
         <div className="preview-topline">
-          <span className="preview-tag">Gợi ý ngành nghề</span>
+          <span className="preview-tag">Gợi ý ngành</span>
           <span className="match-pill">88% Phù hợp</span>
         </div>
         <div className="career-recommendation">
-          <strong>Khoa học Máy tính / AI</strong>
-          <span>ĐH Bách Khoa TP.HCM</span>
+          <strong>Khoa học Máy tính & AI</strong>
+          <span>ĐH Bách Khoa</span>
         </div>
         <div className="career-traits">
           <span className="trait-chip">Tổ hợp A00, A01</span>
-          <span className="trait-chip">Điểm chuẩn: 26.8</span>
           <span className="trait-chip highlight">Xác suất: An toàn</span>
         </div>
       </div>
@@ -58,24 +57,24 @@ const rooms = [
     icon: ShieldCheck,
     title: 'Quản trị',
     tone: 'admin',
-    text: 'Hiệu trưởng giữ quyền duyệt thành viên. Phân vùng dữ liệu an toàn, ghi nhật ký bảo mật minh bạch.',
+    text: 'Hiệu trưởng duyệt tài khoản. Dữ liệu mỗi trường độc lập.',
     preview: (
       <div className="bento-preview preview-admin" aria-hidden="true">
         <div className="preview-topline">
-          <span className="preview-tag">Kiểm toán trường học</span>
+          <span className="preview-tag">Kiểm toán trường</span>
           <span className="school-badge-code">SP-NDU12A</span>
         </div>
         <div className="audit-item">
           <div className="audit-avatar">HT</div>
           <div className="audit-text">
-            <strong>Duyệt hồ sơ giáo viên & lớp học</strong>
-            <small>Hiệu trưởng duyệt · 08:30</small>
+            <strong>Duyệt hồ sơ giáo viên</strong>
+            <small>08:30 · Đã xác thực</small>
           </div>
           <span className="verified-badge">✓ Đã duyệt</span>
         </div>
         <div className="preview-lock-banner">
           <LockKeyhole size={13} />
-          <span>Cô lập dữ liệu RLS theo từng trường</span>
+          <span>Cách ly dữ liệu từng trường</span>
         </div>
       </div>
     ),
@@ -83,14 +82,14 @@ const rooms = [
 ] as const;
 
 const openSteps = [
-  { n: '01', title: 'Gửi yêu cầu', text: 'Hiệu trưởng điền tên trường, họ tên, email công việc và tỉnh thành.' },
-  { n: '02', title: 'Admin duyệt', text: 'Đội ngũ nền tảng xác thực thông tin trường và phê duyệt.' },
-  { n: '03', title: 'Nhận thư kích hoạt', text: 'Email riêng gửi hiệu trưởng. Trường cấp tài khoản cho thầy cô và học sinh.' },
+  { n: '01', title: 'Điền form', text: 'Thông tin trường và hiệu trưởng.' },
+  { n: '02', title: 'Duyệt nhanh', text: 'Xác thực trong ngày làm việc.' },
+  { n: '03', title: 'Kích hoạt', text: 'Nhận thư kích hoạt vào trường.' },
 ];
 
 const navLinks = [
-  { href: '#platform', label: 'Việc trong trường' },
-  { href: '#security', label: 'Riêng từng trường' },
+  { href: '#platform', label: 'Tính năng' },
+  { href: '#security', label: 'Bảo mật' },
   { to: '/auth/school-request', label: 'Mở trường' },
 ] as const;
 
@@ -108,7 +107,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void } = {}) {
 
 function SchoolWindow({ reduceMotion }: { reduceMotion: boolean | null }) {
   const { scrollY } = useScroll();
-  const parallaxY = useTransform(scrollY, [0, 480], [0, 20]);
+  const parallaxY = useTransform(scrollY, [0, 480], [0, 16]);
 
   return (
     <motion.div className="hero-panel-shift" style={reduceMotion ? undefined : { y: parallaxY }}>
@@ -116,25 +115,24 @@ function SchoolWindow({ reduceMotion }: { reduceMotion: boolean | null }) {
       <motion.div
         className="hero-panel hero-panel-3d"
         aria-label="Cửa sổ lớp 12A1 trường Nguyễn Du"
-        initial={reduceMotion ? false : { opacity: 0, y: 24, scale: 0.96 }}
+        initial={reduceMotion ? false : { opacity: 0, y: 20, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.24, delay: 0.08, ease: APPLE_EASE }}
+        transition={{ duration: 0.22, delay: 0.06, ease: APPLE_EASE }}
       >
         <div className="panel-chrome">
-          <span className="window-dots" aria-hidden="true"><i /><i /><i /></span>
-          <span>THPT Nguyễn Du (TP.HCM) · Không gian số</span>
-          <span className="live-dot">Đang hoạt động</span>
+          <span className="school-status-chip">THPT Nguyễn Du</span>
+          <span className="live-dot">Trực tuyến</span>
         </div>
 
         <div className="progress-card">
           <div className="progress-card-header">
             <div>
-              <span className="panel-kicker">Lớp 12A1 · Môn Toán</span>
-              <strong>Ôn tập hàm số & tích phân</strong>
+              <span className="panel-kicker">Lớp 12A1 · Toán</span>
+              <strong>Ôn tập Hàm số & Tích phân</strong>
             </div>
             <div className="floating-metric-chip">
               <Sparkles size={14} />
-              <span>Điểm TB: <b>8.6</b></span>
+              <span>TB: <b>8.6</b></span>
             </div>
           </div>
           <div className="progress-track" aria-hidden="true">
@@ -142,11 +140,11 @@ function SchoolWindow({ reduceMotion }: { reduceMotion: boolean | null }) {
               className="progress-fill"
               initial={reduceMotion ? false : { scaleX: 0 }}
               animate={{ scaleX: 0.82 }}
-              transition={{ duration: 0.3, delay: 0.12, ease: APPLE_EASE }}
+              transition={{ duration: 0.3, delay: 0.1, ease: APPLE_EASE }}
             />
           </div>
           <div className="progress-card-footer">
-            <small>28/34 học sinh đã hoàn thành bài</small>
+            <small>28/34 đã nộp bài</small>
             <small className="progress-percent">82%</small>
           </div>
         </div>
@@ -155,44 +153,43 @@ function SchoolWindow({ reduceMotion }: { reduceMotion: boolean | null }) {
         <div className="ai-snippet-box">
           <div className="ai-snippet-header">
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-              <BotMessageSquare size={15} /> AI học tập · Giải đáp môn Toán
+              <BotMessageSquare size={15} /> AI Trợ giảng · Toán học
             </span>
             <span className="showcase-stat-badge">
-              <Sparkles size={12} /> Trích dẫn bài giảng
+              <Sparkles size={12} /> Trích dẫn SGK
             </span>
           </div>
           <p className="ai-snippet-body">
-            “Đạo hàm f'(x₀) thể hiện hệ số góc của tiếp tuyến đồ thị hàm số tại điểm M(x₀, f(x₀))…”
+            “Đạo hàm f'(x₀) là hệ số góc của tiếp tuyến đồ thị hàm số tại M(x₀, f(x₀))…”
           </p>
           <div className="ai-citation-chip">
-            <BookOpenCheck size={12} /> Bài 1: Khảo sát hàm số (Sách giáo khoa 12)
+            <BookOpenCheck size={12} /> Khảo sát hàm số (SGK Toán 12)
           </div>
         </div>
 
         <div className="panel-grid">
           {[
-            { icon: UsersRound, value: '12', label: 'Lớp học', sub: 'Đang hoạt động' },
-            { icon: ClipboardCheck, value: '98%', label: 'Bài nộp đúng hạn', sub: 'Tuần này' },
-            { icon: BriefcaseBusiness, value: '04', label: 'Hồ sơ hướng nghiệp', sub: 'Gợi ý mới' },
+            { icon: UsersRound, value: '12', label: 'Lớp học' },
+            { icon: ClipboardCheck, value: '98%', label: 'Nộp đúng hạn' },
+            { icon: BriefcaseBusiness, value: '04', label: 'Ngành gợi ý' },
           ].map((tile, index) => {
             const Icon = tile.icon;
             return (
               <motion.div
                 key={tile.label}
                 className="panel-stat-tile"
-                initial={reduceMotion ? false : { opacity: 0, y: 12, scale: 0.98 }}
+                initial={reduceMotion ? false : { opacity: 0, y: 10, scale: 0.98 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                transition={{ duration: 0.24, delay: 0.08 + index * 0.04, ease: APPLE_EASE }}
+                transition={{ duration: 0.2, delay: 0.08 + index * 0.04, ease: APPLE_EASE }}
               >
-                <div className="tile-icon-wrap"><Icon size={20} aria-hidden="true" /></div>
+                <div className="tile-icon-wrap"><Icon size={18} aria-hidden="true" /></div>
                 <b>{tile.value}</b>
                 <span>{tile.label}</span>
-                <small>{tile.sub}</small>
               </motion.div>
             );
           })}
         </div>
-        <p className="panel-note"><LockKeyhole size={15} aria-hidden="true" /> Dữ liệu lớp này chỉ lưu hành nội bộ trường THPT Nguyễn Du.</p>
+        <p className="panel-note"><LockKeyhole size={14} aria-hidden="true" /> Dữ liệu lưu hành nội bộ trường THPT Nguyễn Du.</p>
       </motion.div>
     </motion.div>
   );
@@ -222,7 +219,7 @@ export function LandingPage() {
       <a className="skip-link" href="#main-content">Đi tới nội dung chính</a>
       <header className="topbar-wrap">
         <div className="topbar">
-          <Link className="brand" to="/" aria-label="Smart Path Platform trang chủ">
+          <Link className="brand" to="/" aria-label="IntelliSchool trang chủ">
             <BrandLogo size="sm" subtitle="Nền tảng trường số" />
           </Link>
           <nav className="topbar-nav" aria-label="Điều hướng chính">
@@ -231,13 +228,13 @@ export function LandingPage() {
           <div className={`topbar-menu${menuOpen ? ' is-open' : ''}`}>
             <button className="topbar-menu-toggle" type="button" aria-expanded={menuOpen} aria-controls="mobile-site-navigation" onClick={() => setMenuOpen((current) => !current)}>
               <Menu size={20} aria-hidden="true" />
-              Mục lục
+              Menu
             </button>
             {menuOpen && <nav id="mobile-site-navigation" aria-label="Mục lục trang"><NavLinks onNavigate={() => setMenuOpen(false)} /></nav>}
           </div>
           <div className="topbar-actions">
             <Link className="button button-login" to="/auth/login">Đăng nhập</Link>
-            <Link className="button button-primary" to="/auth/school-request">Gửi yêu cầu <ArrowRight size={16} aria-hidden="true" /></Link>
+            <Link className="button button-primary" to="/auth/school-request">Mở trường <ArrowRight size={16} aria-hidden="true" /></Link>
           </div>
         </div>
       </header>
@@ -248,19 +245,19 @@ export function LandingPage() {
               <p className="eyebrow">Nền tảng trường số · THPT</p>
             </MotionReveal>
             <MotionReveal tone="landing" index={1} variant="clip-up">
-              <h1 id="hero-title">Dạy, học và hướng nghiệp trong <em>chỗ của trường.</em></h1>
+              <h1 id="hero-title">Không gian số <em>toàn diện</em> cho trường THPT.</h1>
             </MotionReveal>
             <MotionReveal tone="landing" index={2}>
-              <p className="hero-lede">Hiệu trưởng gửi yêu cầu. Thầy cô soạn bài, giao bài, mở ca thi thử. Học sinh làm quiz và xem gợi ý ngành. Dữ liệu trường này không sang trường kia.</p>
+              <p className="hero-lede">Lớp học LMS, AI trợ giảng, hướng nghiệp SIMGR và quản trị phân vùng riêng biệt.</p>
             </MotionReveal>
             <MotionReveal tone="landing" index={3}>
               <div className="hero-actions">
-                <Link className="button button-primary" to="/auth/school-request">Gửi yêu cầu mở trường <ArrowRight size={18} aria-hidden="true" /></Link>
-                <Link className="text-link" to="/auth/login">Đăng nhập tài khoản</Link>
+                <Link className="button button-primary" to="/auth/school-request">Mở trường ngay <ArrowRight size={18} aria-hidden="true" /></Link>
+                <Link className="button button-quiet" to="/auth/login">Đăng nhập</Link>
               </div>
               <ul className="trust-list" aria-label="Hai trường đang chạy thử">
-                <li><CheckCircle2 size={17} aria-hidden="true" /> THPT Nguyễn Du, TP. Hồ Chí Minh</li>
-                <li><CheckCircle2 size={17} aria-hidden="true" /> THPT Lê Quý Đôn, TP. Hồ Chí Minh</li>
+                <li><CheckCircle2 size={16} aria-hidden="true" /> THPT Nguyễn Du</li>
+                <li><CheckCircle2 size={16} aria-hidden="true" /> THPT Lê Quý Đôn</li>
               </ul>
             </MotionReveal>
           </div>
@@ -270,8 +267,8 @@ export function LandingPage() {
         <section className="platform-section" id="platform" aria-labelledby="platform-title">
           <MotionReveal tone="landing" when="view">
             <div className="section-heading">
-              <p className="eyebrow">Ba việc trong cùng một trường</p>
-              <h2 id="platform-title">Lớp học buổi sáng. Hướng nghiệp khi cần. Quản trị suốt ngày.</h2>
+              <p className="eyebrow">Tính năng cốt lõi</p>
+              <h2 id="platform-title">Lớp học. Hướng nghiệp. Quản trị.</h2>
             </div>
           </MotionReveal>
           <div className="path-grid">
@@ -279,7 +276,7 @@ export function LandingPage() {
               <MotionReveal key={title} tone="landing" when="view" index={index}>
                 <article className={`path-card is-${tone}`}>
                   <div className="path-card-header">
-                    <div className="path-icon-badge"><Icon size={26} aria-hidden="true" /></div>
+                    <div className="path-icon-badge"><Icon size={24} aria-hidden="true" /></div>
                     <h3>{title}</h3>
                   </div>
                   <p>{text}</p>
@@ -293,8 +290,8 @@ export function LandingPage() {
         <section className="security-section" id="security" aria-labelledby="security-title">
           <MotionReveal tone="landing" when="view">
             <div className="section-heading">
-              <p className="eyebrow">Ranh giới giữa các trường</p>
-              <h2 id="security-title">Học sinh Nguyễn Du không thấy dữ liệu Lê Quý Đôn.</h2>
+              <p className="eyebrow">Bảo mật đa trường</p>
+              <h2 id="security-title">Dữ liệu mỗi trường hoàn toàn độc lập.</h2>
             </div>
           </MotionReveal>
           <MotionReveal tone="landing" when="view" index={1} variant="scale-in">
@@ -302,43 +299,33 @@ export function LandingPage() {
               <div className="school-pair" aria-hidden="true">
                 <article className="mini-school">
                   <div className="mini-school-chrome">
-                    <span className="window-dots"><i /><i /><i /></span>
                     <span className="mini-status-pill">Khu vực riêng</span>
                   </div>
                   <strong>THPT Nguyễn Du</strong>
-                  <span>TP. Hồ Chí Minh · lớp 12A1</span>
-                  <div className="mini-school-meta">
-                    <span>Mã: <code>SP-NDU</code></span>
-                    <span>34 học sinh</span>
-                  </div>
+                  <span>Lớp 12A1 · 34 học sinh</span>
                 </article>
                 <div className="school-isolation-barrier">
                   <div className="barrier-shield">
                     <LockKeyhole size={18} />
                   </div>
-                  <p className="school-pair-gap">Không thấy nhau</p>
+                  <p className="school-pair-gap">Cách ly 100%</p>
                   <div className="barrier-line" />
                 </div>
                 <article className="mini-school">
                   <div className="mini-school-chrome">
-                    <span className="window-dots"><i /><i /><i /></span>
                     <span className="mini-status-pill">Khu vực riêng</span>
                   </div>
                   <strong>THPT Lê Quý Đôn</strong>
-                  <span>TP. Hồ Chí Minh · lớp 12B2</span>
-                  <div className="mini-school-meta">
-                    <span>Mã: <code>SP-LQD</code></span>
-                    <span>36 học sinh</span>
-                  </div>
+                  <span>Lớp 12B2 · 36 học sinh</span>
                 </article>
               </div>
             </div>
           </MotionReveal>
           <MotionReveal tone="landing" when="view" index={2}>
             <div className="security-points">
-              <p><Building2 aria-hidden="true" size={22} /><span><b>Một trường, một khu</b>Lớp, điểm, hồ sơ hướng nghiệp nằm trong trường đó.</span></p>
-              <p><ShieldCheck aria-hidden="true" size={22} /><span><b>Hiệu trưởng giữ cửa</b>Giáo viên và học sinh vào sau khi được duyệt. Không tự đăng ký rồi vào lớp.</span></p>
-              <p><LockKeyhole aria-hidden="true" size={22} /><span><b>Có nhật ký bảo mật</b>Ghi ai duyệt tài khoản, ai mở lớp, lúc nào.</span></p>
+              <p><Building2 aria-hidden="true" size={20} /><span><b>Một trường, một khu</b>Lớp học, điểm số, dữ liệu riêng biệt.</span></p>
+              <p><ShieldCheck aria-hidden="true" size={20} /><span><b>Hiệu trưởng phê duyệt</b>Tài khoản giáo viên và học sinh được cấp quyền.</span></p>
+              <p><LockKeyhole aria-hidden="true" size={20} /><span><b>Nhật ký bảo mật</b>Lưu vết kiểm toán toàn diện, minh bạch.</span></p>
             </div>
           </MotionReveal>
         </section>
@@ -346,8 +333,8 @@ export function LandingPage() {
         <section className="request-section" aria-labelledby="open-school-title">
           <div className="request-intro">
             <MotionReveal tone="landing" when="view">
-              <p className="eyebrow">Mở trường trên Smart Path</p>
-              <h2 id="open-school-title">Ba bước. Form một lần. Email kích hoạt gửi hiệu trưởng.</h2>
+              <p className="eyebrow">Mở trường trên IntelliSchool</p>
+              <h2 id="open-school-title">3 bước mở trường đơn giản.</h2>
               <ol className="open-steps">
                 {openSteps.map((step) => (
                   <li key={step.n}>
@@ -363,15 +350,15 @@ export function LandingPage() {
           </div>
           <MotionReveal tone="landing" when="view" index={1} variant="scale-in">
             <div className="request-cta">
-              <p>Form nằm trên trang riêng. Hiệu trưởng điền xong, admin nền tảng duyệt rồi gửi email kích hoạt.</p>
-              <Link className="button button-primary" to="/auth/school-request">Đi tới form mở trường <ArrowRight size={18} aria-hidden="true" /></Link>
+              <p>Dành riêng cho Hiệu trưởng và Ban giám hiệu các trường THPT.</p>
+              <Link className="button button-primary" to="/auth/school-request">Mở trường ngay <ArrowRight size={18} aria-hidden="true" /></Link>
               <Link className="text-link request-login" to="/auth/login">Đã có tài khoản? Đăng nhập</Link>
             </div>
           </MotionReveal>
         </section>
       </main>
       <footer>
-        <p>Smart Path Platform · THPT Nguyễn Du và THPT Lê Quý Đôn đang dùng bản thử.</p>
+        <p>IntelliSchool · Nền tảng trường số THPT.</p>
         <p className="footer-links">
           <Link to="/auth/login">Đăng nhập</Link>
           <Link to="/auth/school-request">Mở trường</Link>

@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-require-imports -- sanitize-html exposes a CommonJS export.
-import sanitizeHtml = require('sanitize-html');
+import sanitizeHtml from 'sanitize-html';
 
 const lessonAllowedTags = [
   'p', 'br', 'strong', 'em', 'b', 'i', 'u', 's', 'mark', 'sub', 'sup', 'code', 'pre',

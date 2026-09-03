@@ -19,6 +19,7 @@ export function CareerDashboardPage() {
   const [aspirations, setAspirations] = useState<Aspiration[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   const [message, setMessage] = useState('');
+  const [statusType, setStatusType] = useState<'success' | 'error'>('success');
   const [sending, setSending] = useState(false);
   const goalAction = useRef(createIdempotentAction('goal', newIdempotencyKey)).current;
 
@@ -35,7 +36,12 @@ export function CareerDashboardPage() {
     setMatches(recs.matches ?? []);
   }
 
-  useEffect(() => { void reload().catch((error) => setMessage(error instanceof ApiRequestError ? error.message : 'Chưa tải được bảng hướng nghiệp.')); }, []);
+  useEffect(() => {
+    void reload().catch((error) => {
+      setStatusType('error');
+      setMessage(error instanceof ApiRequestError ? error.message : 'Chưa tải được bảng hướng nghiệp.');
+    });
+  }, []);
 
   async function addGoal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -50,31 +56,49 @@ export function CareerDashboardPage() {
       setGoals((current) => [...current, created]);
       formElement.reset();
       goalAction.end(input, true);
+      setStatusType('success');
       setMessage('Đã thêm mục tiêu.');
-      void reload().catch(() => setMessage('Đã thêm mục tiêu nhưng chưa làm mới được dữ liệu.'));
+      void reload().catch(() => {
+        setStatusType('error');
+        setMessage('Đã thêm mục tiêu nhưng chưa làm mới được dữ liệu.');
+      });
     } catch (error) {
       goalAction.end(input, false);
+      setStatusType('error');
       setMessage(error instanceof ApiRequestError ? error.message : 'Chưa thể thêm mục tiêu.');
     }
   }
 
   async function saveScores(event: FormEvent<HTMLFormElement>, source: 'CLASSROOM' | 'GRADUATION') {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const recordsToSave = SUBJECTS.map((subject) => ({ subjectCode: subject, score: Number(form.get(`${source}-${subject}`)), year: 2026, source })).filter((row) => Number.isFinite(row.score) && row.score > 0);
-    if (recordsToSave.length === 0) { setMessage('Nhập ít nhất một điểm.'); return; }
-    setSending(true); setMessage('');
+    if (recordsToSave.length === 0) {
+      setStatusType('error');
+      setMessage('Nhập ít nhất một điểm.');
+      return;
+    }
+    setSending(true);
+    setMessage('');
     try {
       await apiRequest('/api/v1/career/exam-records', { method: 'PUT', idempotencyKey: newIdempotencyKey('exam-records'), body: { records: recordsToSave } });
       if (source === 'GRADUATION') {
         const subjectScores = Object.fromEntries(recordsToSave.map((row) => [row.subjectCode, row.score]));
         await apiRequest('/api/v1/career/profile', { method: 'PATCH', idempotencyKey: newIdempotencyKey('grad-profile'), body: { subjectScores } });
       }
+      setStatusType('success');
       setMessage(source === 'CLASSROOM' ? 'Đã lưu điểm học kỳ.' : 'Đã lưu điểm thi tốt nghiệp (đúng các môn em chọn).');
-      void reload().catch(() => setMessage('Đã lưu điểm nhưng chưa làm mới được dữ liệu.'));
+      void reload().catch(() => {
+        setStatusType('error');
+        setMessage('Đã lưu điểm nhưng chưa làm mới được dữ liệu.');
+      });
     } catch (error) {
+      setStatusType('error');
       setMessage(error instanceof ApiRequestError ? error.message : 'Chưa thể lưu điểm.');
-    } finally { setSending(false); }
+    } finally {
+      setSending(false);
+    }
   }
 
   const tabs = [
@@ -89,7 +113,11 @@ export function CareerDashboardPage() {
   return (
     <>
       <PageHeader eyebrow="Hướng nghiệp" title="Bảng hướng nghiệp" lede="Tách điểm học kỳ, điểm thi tốt nghiệp và tổ hợp xét tuyển đại học." />
-      {message && <p className="form-message is-success" role="status">{message}</p>}
+      {message && (
+        <p className={`form-message ${statusType === 'error' ? 'is-error' : 'is-success'}`} role={statusType === 'error' ? 'alert' : 'status'}>
+          {message}
+        </p>
+      )}
       <div className="tab-row" role="tablist">
         {tabs.map((item) => (
           <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} className={tab === item.id ? 'is-active' : ''} onClick={() => setTab(item.id)}>{item.label}</button>

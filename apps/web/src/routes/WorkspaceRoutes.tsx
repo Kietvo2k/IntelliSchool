@@ -16,7 +16,6 @@ import { AssignmentsPage } from './AssignmentsPage.js';
 import { AuditLogPage } from './AuditLogPage.js';
 import { BillingPage } from './BillingPage.js';
 import { CareerAiPage } from './CareerAiPage.js';
-import { CareerDashboardPage } from './CareerDashboardPage.js';
 import { CareerGuidePage } from './CareerGuidePage.js';
 import { CareerQuizPage } from './CareerQuizPage.js';
 import { CareerResultsPage } from './CareerResultsPage.js';
@@ -107,7 +106,7 @@ export function WorkspaceRoutes() {
         <Route path="career-quiz" element={<RoleRoute roles={['STUDENT']} element={<CareerQuizPage />} />} />
         <Route path="career-results" element={<RoleRoute roles={['STUDENT']} element={<CareerResultsPage />} />} />
         <Route path="career-schools" element={<RoleRoute roles={['STUDENT']} element={<CareerSchoolsPage />} />} />
-        <Route path="career-dashboard" element={<RoleRoute roles={['STUDENT']} element={<CareerDashboardPage />} />} />
+        <Route path="career-dashboard" element={<Navigate to="/app/career-quiz" replace />} />
         <Route path="career-ai" element={<RoleRoute roles={['STUDENT']} element={<CareerAiPage />} />} />
         <Route path="career-guide" element={<RoleRoute roles={['STUDENT']} element={<CareerGuidePage />} />} />
         <Route path="messages" element={<RoleRoute roles={['STUDENT', 'TEACHER']} element={<MessagesPage />} />} />

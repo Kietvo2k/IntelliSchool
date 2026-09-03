@@ -1,4 +1,4 @@
-﻿import { Component, type ErrorInfo, type ReactNode, StrictMode } from 'react';
+import { Component, type ErrorInfo, type ReactNode, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App } from './App.js';
@@ -20,7 +20,7 @@ class RootErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
     if (this.state.error) {
       return (
         <main style={{ padding: '2rem', fontFamily: 'system-ui, sans-serif' }}>
-          <h1>Không mở được Smart Path</h1>
+          <h1>Không mở được IntelliSchool</h1>
           <p>{this.state.error.message}</p>
         </main>
       );

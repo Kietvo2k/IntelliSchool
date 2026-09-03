@@ -1,4 +1,4 @@
-﻿import { renderToStaticMarkup } from 'react-dom/server';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { App } from './App.js';
@@ -14,11 +14,11 @@ function renderApp(route = '/') {
   );
 }
 
-describe('Smart Path Platform landing page', () => {
-  it('uses the Smart Path Platform brand and presents the three product paths', () => {
+describe('IntelliSchool landing page', () => {
+  it('uses the IntelliSchool brand and presents the three product paths', () => {
     const markup = renderApp();
     const text = markup.replace(/<[^>]*>/g, '');
-    expect(text).toContain('Smart Path Platform');
+    expect(text).toContain('IntelliSchool');
     expect(text).toContain('Nền tảng trường số');
     expect(markup).toContain('Lớp học');
     expect(markup).toContain('Định hướng');

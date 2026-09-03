@@ -20,7 +20,7 @@ export function NotFoundPage() {
   return (
     <main className="auth-page not-found-page">
       <div className="not-found-card">
-        <Link className="brand auth-link" to={session ? '/app' : '/'} aria-label="Smart Path Platform">
+        <Link className="brand auth-link" to={session ? '/app' : '/'} aria-label="IntelliSchool">
           <BrandLogo size="md" subtitle={session ? 'Không gian làm việc' : 'Nền tảng trường số'} />
         </Link>
 

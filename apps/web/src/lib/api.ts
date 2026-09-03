@@ -22,7 +22,7 @@ function unique(values: string[]): string[] {
 function isSmartPathHealth(payload: unknown): boolean {
   if (!payload || typeof payload !== 'object') return false;
   const data = (payload as { data?: { status?: string; product?: string } }).data;
-  return data?.status === 'ok' && typeof data.product === 'string' && data.product.includes('Smart Path');
+  return data?.status === 'ok' && typeof data.product === 'string' && (data.product.includes('Smart Path') || data.product.includes('IntelliSchool'));
 }
 
 async function probe(base: string): Promise<boolean> {

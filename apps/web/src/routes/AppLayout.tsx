@@ -119,7 +119,6 @@ function navigationFor(role: WorkspaceRole, homeroomClassIds: string[]): NavGrou
     },
     {
       id: 'career', label: 'Hướng nghiệp', items: [
-        { to: '/app/career-dashboard', label: 'Bảng hướng nghiệp', icon: BriefcaseBusiness },
         { to: '/app/career-quiz', label: 'Khám phá', icon: Radar },
         { to: '/app/career-results', label: 'Kết quả', icon: Radar },
         { to: '/app/career-schools', label: 'Trường gợi ý', icon: School },
@@ -234,7 +233,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
           >
             <PanelLeftOpen size={18} aria-hidden="true" />
           </button>
-          <a className="brand" href="#workspace" aria-label="Smart Path Platform workspace">
+          <a className="brand" href="#workspace" aria-label="IntelliSchool workspace">
             <BrandLogo size="sm" subtitle={user.schoolId ? 'Không gian trường học' : 'Nền tảng quản trị'} />
           </a>
         </div>
